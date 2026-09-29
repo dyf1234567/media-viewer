@@ -73,8 +73,6 @@ interface UiState {
   shortcutHelpOpen: boolean
   /** 相似图片查重对话框 */
   similarOpen: boolean
-  /** 筛选面板展开(漏斗按钮;激活条件的 chips 始终显示,与此独立) */
-  filterPanelOpen: boolean
   /** Delete 键触发的删除确认:'trash' 移入回收站 / 'system' 删除到系统回收站 */
   deleteConfirm: null | 'trash' | 'system'
   detailsAssetId: number | null
@@ -117,7 +115,6 @@ export const useUiStore = defineStore('ui', {
     compareOpen: false,
     shortcutHelpOpen: false,
     similarOpen: false,
-    filterPanelOpen: false,
     deleteConfirm: null,
     detailsAssetId: null,
     ...loadPersisted()

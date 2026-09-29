@@ -426,7 +426,7 @@ const filteredTags = computed(() => {
 }
 .bar-enter-active,
 .bar-leave-active {
-  transition: all 0.18s ease;
+  transition: opacity 0.18s ease, transform 0.18s ease;
 }
 .bar-enter-from,
 .bar-leave-to {

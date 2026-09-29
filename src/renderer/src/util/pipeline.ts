@@ -172,7 +172,21 @@ export function activeFilterChips(
 }
 
 function colorLabel(c: string): string {
-  return { red: '红色系', green: '绿色系', blue: '蓝色系', warm: '暖色调', cool: '冷色调' }[c] ?? c
+  return (
+    {
+      red: '红色系',
+      orange: '橙色系',
+      yellow: '黄色系',
+      green: '绿色系',
+      cyan: '青色系',
+      blue: '蓝色系',
+      purple: '紫色系',
+      pink: '粉色系',
+      gray: '灰阶',
+      warm: '暖色调',
+      cool: '冷色调'
+    }[c] ?? c
+  )
 }
 function daysLabel(d: number): string {
   return d >= 365 ? '1 年' : d >= 90 ? '3 个月' : d >= 30 ? '30 天' : d >= 7 ? '7 天' : '今天'

@@ -3,7 +3,7 @@ import { getSettings } from './settings'
 import { purgeExpired } from './trash'
 import { trimThumbCache, backfillThumbs, checkThumbPolicy } from './thumbs'
 import { trimVideoCache } from './video'
-import { extractColors } from './colors'
+import { extractColors, classify } from './colors'
 import { backfillPhashes } from './phash'
 import { readAiMeta } from './meta'
 import { emitAsset } from './emitter'
@@ -43,6 +43,35 @@ export async function runStartupMaintenance(): Promise<void> {
   void backfillColors()
   void backfillPhashes(2000)
   void upgradeAiMeta()
+  void upgradeColorFamily()
+}
+
+/** 色系分类策略升级(v2:5 档粗分改为 9 档色板,灰阶也参与筛选):按已存主题色重算 color_family,无需重读文件 */
+const COLOR_FAMILY_POLICY = 2
+async function upgradeColorFamily(): Promise<void> {
+  const db = getDb()
+  try {
+    const row = db.prepare('SELECT v FROM settings WHERE k = ?').get('colorfamily_policy') as { v: string } | undefined
+    if (row?.v === String(COLOR_FAMILY_POLICY)) return
+    const rows = db
+      .prepare("SELECT id, colors FROM assets WHERE colors IS NOT NULL AND colors != '[]'")
+      .all() as { id: number; colors: string }[]
+    const upd = db.prepare('UPDATE assets SET color_family = ? WHERE id = ?')
+    for (const r of rows) {
+      let family: string | null = null
+      try {
+        const list = JSON.parse(r.colors) as { r: number; g: number; b: number }[]
+        // 以占比最高的主题色判定色系,比全图平均色更贴近观感
+        if (Array.isArray(list) && list.length) family = classify(list[0].r, list[0].g, list[0].b)
+      } catch {
+        /* 解析失败保持 null */
+      }
+      upd.run(family, r.id)
+    }
+    db.prepare('INSERT OR REPLACE INTO settings (k, v) VALUES (?, ?)').run('colorfamily_policy', String(COLOR_FAMILY_POLICY))
+  } catch {
+    /* 失败下次启动再试 */
+  }
 }
 
 /** AI 元数据解析策略升级(v2:支持 Qwen 等新文本编码节点;v3:修正空负向兜底):清空旧解析并重读 */

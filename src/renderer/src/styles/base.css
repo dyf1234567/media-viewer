@@ -45,8 +45,9 @@ body[data-ui-bg='basalt'] {
 }
 
 /* ===== 动态背景光斑层 =====
-   三团大模糊圆缓慢漂移(transform 动画,GPU 合成不重绘);
-   颜色/透明度由各界面预设提供,graphite 与 custom 默认透明隐藏 */
+   三团大光斑缓慢漂移(transform 动画,GPU 合成不重绘);
+   软边由 radial-gradient 自带衰减实现——刻意不用 filter:blur,
+   大面积模糊滤镜会持续占用 GPU,是界面发卡的元凶 */
 .bg-orbs {
   position: fixed;
   inset: 0;
@@ -56,10 +57,9 @@ body[data-ui-bg='basalt'] {
 }
 .bg-orbs .orb {
   position: absolute;
-  width: 54vmax;
-  height: 54vmax;
+  width: 58vmax;
+  height: 58vmax;
   border-radius: 50%;
-  filter: blur(64px);
   opacity: var(--orb-opacity, 0);
   will-change: transform;
 }

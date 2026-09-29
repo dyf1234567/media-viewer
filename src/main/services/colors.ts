@@ -66,20 +66,23 @@ function dist(a: RGB, b: RGB): number {
   return Math.sqrt(dr * dr + dg * dg + db * db)
 }
 
-/** 色系分类:红/绿/蓝/暖/冷 */
-function classify(r: number, g: number, b: number): string | null {
+/** 色系分类(9 档,贴近 Eagle 预设色板):红/橙/黄/绿/青/蓝/紫/粉/灰;无像素时为 null */
+export function classify(r: number, g: number, b: number): string | null {
   const mx = Math.max(r, g, b)
   const mn = Math.min(r, g, b)
   const sat = mx === 0 ? 0 : (mx - mn) / mx
-  if (sat < 0.18) return null
+  if (sat < 0.16) return 'gray'
   // 色相
   let h: number
   if (mx === r) h = 60 * (((g - b) / (mx - mn) + 6) % 6)
   else if (mx === g) h = 60 * ((b - r) / (mx - mn) + 2)
   else h = 60 * ((r - g) / (mx - mn) + 4)
-  if (h >= 345 || h < 20) return 'red'
-  if (h >= 80 && h < 165) return 'green'
-  if (h >= 185 && h < 265) return 'blue'
-  if (h < 80 || h >= 265) return 'warm'
-  return 'cool'
+  if (h >= 348 || h < 14) return 'red'
+  if (h < 42) return 'orange'
+  if (h < 70) return 'yellow'
+  if (h < 155) return 'green'
+  if (h < 200) return 'cyan'
+  if (h < 252) return 'blue'
+  if (h < 290) return 'purple'
+  return 'pink'
 }

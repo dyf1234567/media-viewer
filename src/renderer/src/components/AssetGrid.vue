@@ -664,7 +664,9 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
   background: var(--panel);
   border: 1px solid var(--border);
   cursor: default;
-  transition: border-color 0.15s, box-shadow 0.18s, transform 0.18s;
+  /* 只过渡 transform(合成器动画);box-shadow 逐帧重绘是悬停/滚动发卡的来源,选中与悬停阴影瞬时应用 */
+  transition: border-color 0.15s, transform 0.18s;
+  contain: layout style;
 }
 .card:hover {
   border-color: var(--border-strong);
