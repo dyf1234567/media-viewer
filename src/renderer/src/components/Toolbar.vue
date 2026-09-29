@@ -1,4 +1,4 @@
-?<script setup lang="ts">
+<script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useUiStore, type SortKey } from '../stores/ui'
 import { useLibraryStore } from '../stores/library'
@@ -82,9 +82,21 @@ function openSortMenu(e: MouseEvent): void {
   sortMenuOpen.value = true
 }
 
+// 更多菜单:低频操作收纳,避免工具栏拥挤
+const moreMenuOpen = ref(false)
+const moreMenuX = ref(0)
+const moreMenuY = ref(0)
+function openMoreMenu(e: MouseEvent): void {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  moreMenuX.value = r.left
+  moreMenuY.value = r.bottom + 6
+  moreMenuOpen.value = true
+}
+
 function closePopovers(): void {
   importMenuOpen.value = false
   sortMenuOpen.value = false
+  moreMenuOpen.value = false
 }
 </script>
 
@@ -99,27 +111,9 @@ function closePopovers(): void {
         <Icon name="folder-plus" :size="14" />
         添加目录
       </button>
-      <button
-        class="btn"
-        title="随机打乱当前范围素材,取前 50 张浏览"
-        :disabled="ui.isRandom"
-        @click="randomBrowse"
-      >
-        <Icon name="shuffle" :size="14" />
-        随机浏览
-      </button>
-      <button class="btn" title="按感知指纹查找全库相似图片" @click="ui.similarOpen = true">
-        <Icon name="search" :size="14" />
-        查相似
-      </button>
-      <button
-        v-if="ui.isRandom"
-        class="btn"
-        title="退出随机浏览"
-        @click="ui.setScope('all')"
-      >
-        <Icon name="x" :size="13" />
-        退出随机浏览
+      <button class="btn" title="随机浏览、查找相似图片等更多操作" @click="openMoreMenu">
+        更多
+        <Icon name="chevron-down" :size="12" />
       </button>
     </div>
 
@@ -136,7 +130,8 @@ function closePopovers(): void {
       </button>
     </div>
 
-    <div class="tb-group">
+    <!-- 排序 / 视图 / 缩略图大小:窗口够宽时与搜索同排,不够时整组换行并靠右,保持整齐 -->
+    <div class="tb-group tb-right">
       <button class="btn" :disabled="ui.isRandom" :title="ui.isRandom ? '随机浏览模式下排序已禁用' : '排序方式'" @click="openSortMenu">
         {{ sortLabel }}
         <Icon name="chevron-down" :size="12" />
@@ -205,6 +200,20 @@ function closePopovers(): void {
           {{ s.label }}
         </div>
       </div>
+      <div v-if="moreMenuOpen" class="popover" :style="{ left: moreMenuX + 'px', top: moreMenuY + 'px' }">
+        <div class="popover-item" :class="{ disabled: ui.isRandom }" @click="!ui.isRandom && (randomBrowse(), closePopovers())">
+          <Icon name="shuffle" :size="14" />
+          随机浏览(取前 50 张)
+        </div>
+        <div v-if="ui.isRandom" class="popover-item" @click="ui.setScope('all'); closePopovers()">
+          <Icon name="x" :size="14" />
+          退出随机浏览
+        </div>
+        <div class="popover-item" @click="ui.similarOpen = true; closePopovers()">
+          <Icon name="search" :size="14" />
+          查找相似图片
+        </div>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -213,8 +222,8 @@ function closePopovers(): void {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px 6px;
+  gap: 8px 12px;
+  padding: 10px 14px 8px;
   flex: none;
   flex-wrap: wrap;
 }
@@ -223,10 +232,13 @@ function closePopovers(): void {
   align-items: center;
   gap: 8px;
 }
+.tb-right {
+  margin-left: auto;
+}
 .tb-search {
   flex: 1;
-  min-width: 160px;
-  max-width: 380px;
+  min-width: 150px;
+  max-width: 340px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -279,6 +291,13 @@ function closePopovers(): void {
 }
 .size-ctrl input[type='range'] {
   width: 80px;
+}
+.popover-item.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.popover-item.disabled:hover {
+  background: none;
 }
 .hint-inline {
   font-size: 10.5px;

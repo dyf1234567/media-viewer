@@ -220,10 +220,10 @@ function hasActive(key: string): boolean {
 
 <style scoped>
 .filterbar {
-  padding: 2px 14px 8px;
+  padding: 4px 14px 10px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   flex: none;
   color: var(--text-faint);
 }
@@ -232,12 +232,13 @@ function hasActive(key: string): boolean {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  row-gap: 8px;
 }
 .dim-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 10px;
+  padding: 6px 11px;
   border-radius: 999px;
   background: var(--bg-glass);
   border: 1px solid transparent;
