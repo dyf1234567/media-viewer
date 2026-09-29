@@ -192,15 +192,41 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
     heunpp2: 'Heun++'
   }
 
-  /** API 图里 inputs 的值可能是 ["节点id", 槽位] 引用,取被引用节点的 text */
-  const textOfRef = (
+  /** 文本编码节点识别:CLIPEncodeXxx / TextEncodeQwenImage21 / WanVideoTextEncode 等都覆盖 */
+  const isTextNode = (ct: string): boolean => /cliptextencode|textencode/i.test(ct)
+
+  const posTextOf = (node: { inputs?: Record<string, unknown> }): string | null => {
+    const inp = node.inputs ?? {}
+    for (const k of ['prompt', 'text', 'text_pos', 'texts']) {
+      const v = inp[k]
+      if (typeof v === 'string' && v.trim()) return v
+    }
+    return null
+  }
+  const negTextOf = (node: { inputs?: Record<string, unknown> }): string | null => {
+    const inp = node.inputs ?? {}
+    const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
+    const explicit = str(inp['negative_prompt']) ?? str(inp['negative']) ?? str(inp['text_neg']) ?? str(inp['neg'])
+    if (explicit) return explicit
+    // 双键节点(prompt/negative_prompt 型)负向为空就是空,不能兜底取正向文本
+    const hasDual = 'negative_prompt' in inp || 'text_neg' in inp
+    if (hasDual) return null
+    return str(inp['text']) ?? str(inp['prompt'])
+  }
+
+  /** 沿引用递归找文本编码节点(可穿过 ConditioningCombine 等中间节点) */
+  const traceTextNode = (
     graph: Record<string, { class_type: string; inputs: Record<string, unknown> }>,
-    ref: unknown
-  ): string | null => {
-    if (Array.isArray(ref) && ref.length >= 1) {
-      const node = graph[String(ref[0])]
-      const t = node?.inputs?.['text']
-      if (typeof t === 'string' && t.trim()) return t
+    ref: unknown,
+    depth = 0
+  ): { class_type: string; inputs: Record<string, unknown> } | null => {
+    if (depth > 6 || !Array.isArray(ref)) return null
+    const node = graph[String(ref[0])]
+    if (!node) return null
+    if (isTextNode(node.class_type)) return node
+    for (const k of ['positive', 'negative', 'conditioning', 'conditioning_1', 'conditioning_2']) {
+      const n = traceTextNode(graph, node.inputs?.[k], depth + 1)
+      if (n) return n
     }
     return null
   }
@@ -214,9 +240,14 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
       const texts: string[] = []
       for (const node of Object.values(graph)) {
         const ct = node.class_type.toLowerCase()
-        if (ct.includes('cliptextencode')) {
-          const t = node.inputs['text']
-          if (typeof t === 'string') texts.push(t)
+        if (isTextNode(ct)) {
+          // Qwen 型节点自带 prompt/negative_prompt 双键,直接读
+          const p = posTextOf(node)
+          const ng = negTextOf(node)
+          if (p && !prompt) prompt = p
+          if (ng && !negative) negative = ng
+          if (p) texts.push(p)
+          if (ng) texts.push(ng)
         }
         if (ct.includes('checkpointloader')) {
           const m = node.inputs['ckpt_name']
@@ -226,7 +257,7 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
           const m = node.inputs['unet_name'] ?? node.inputs['lora_name']
           if (typeof m === 'string') models.push(m)
         }
-        if (ct.includes('ksampler')) {
+        if (ct.includes('ksampler') || ct.includes('samplercustom')) {
           const inp = node.inputs
           if (typeof inp['steps'] === 'number') params['Steps'] = String(inp['steps'])
           if (typeof inp['cfg'] === 'number') params['CFG scale'] = String(inp['cfg'])
@@ -236,11 +267,19 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
             params['Sampler'] = samplerAliases[sn] ?? sn
           }
           if (typeof inp['denoise'] === 'number') params['Denoise'] = String(inp['denoise'])
-          // 正负提示词从采样器的连线精确回溯(ComfyUI 里顺序不固定)
-          const pos = textOfRef(graph, inp['positive'])
-          const neg = textOfRef(graph, inp['negative'])
-          if (pos && !prompt) prompt = pos
-          if (neg && !negative) negative = neg
+        }
+        // 正负提示词从采样/引导节点的连线精确回溯(新 ComfyUI 可能挂在 Guider 上,顺序不固定)
+        if ('positive' in node.inputs || 'negative' in node.inputs) {
+          const posNode = traceTextNode(graph, node.inputs['positive'])
+          const negNode = traceTextNode(graph, node.inputs['negative'])
+          if (posNode) {
+            const p = posTextOf(posNode)
+            if (p && !prompt) prompt = p
+          }
+          if (negNode) {
+            const ng = negTextOf(negNode)
+            if (ng && !negative) negative = ng
+          }
         }
       }
       // 回溯失败时退回顺序启发:第一条为正向,其余为负向
