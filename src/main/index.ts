@@ -4,6 +4,7 @@ import { createMainWindow } from './window'
 import { initLibrary } from './services/library'
 import { closeDb } from './services/db'
 import { registerIpc } from './ipc'
+import { setupUpdater } from './updater'
 import { runStartupMaintenance } from './services/maintenance'
 import { rebuildWatchRoots } from './services/watcher'
 
@@ -30,6 +31,7 @@ if (!gotLock) {
       initLibrary()
       registerProtocolHandler()
       registerIpc()
+      setupUpdater()
       createMainWindow()
       // 启动自动维护(异步,不阻塞窗口)
       void runStartupMaintenance()

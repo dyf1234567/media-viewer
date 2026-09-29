@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useUiStore } from '../stores/ui'
 import { useSettingsStore } from '../stores/settings'
 import { useToastStore } from '../stores/toast'
@@ -48,6 +48,56 @@ async function save(): Promise<void> {
 }
 
 let unbindMigrate: (() => void) | null = null
+
+// ---------- 应用更新 ----------
+const up = reactive({
+  current: '-',
+  status: 'idle' as string,
+  version: null as string | null,
+  progress: null as number | null,
+  error: null as string | null,
+  checking: false
+})
+
+async function checkUpdate(): Promise<void> {
+  up.checking = true
+  try {
+    const r = await window.mv.updater.check()
+    Object.assign(up, r)
+  } catch (e) {
+    up.status = 'error'
+    up.error = (e as Error).message
+  } finally {
+    up.checking = false
+  }
+}
+
+async function installUpdate(): Promise<void> {
+  const ok = await window.mv.updater.install()
+  if (!ok) toast.error('更新尚未下载完成')
+}
+
+const upText = computed(() => {
+  switch (up.status) {
+    case 'checking':
+      return '正在检查…'
+    case 'downloading':
+      return up.progress != null ? `正在下载 v${up.version ?? ''}(${up.progress}%)…` : '发现新版本,开始下载…'
+    case 'downloaded':
+      return `v${up.version} 已就绪,重启后安装`
+    case 'not-available':
+      return up.error ?? '已是最新版本'
+    case 'error':
+      return `检查失败:${up.error ?? '网络错误'}`
+    default:
+      return ''
+  }
+})
+
+// 打开设置页时顺带拿当前版本号(开发模式静默返回)
+onMounted(() => {
+  void checkUpdate()
+})
 
 async function migrate(): Promise<void> {
   const root = await window.mv.settings.pickLibraryRoot()
@@ -142,6 +192,20 @@ function relaunch(): void {
             <span>MB</span>
           </div>
         </div>
+        <div class="form-row">
+          <label>
+            应用更新
+            <span class="hint">通过 GitHub Releases 检查并自动下载新版本</span>
+          </label>
+          <div class="num-row">
+            <span class="ver-label">v{{ up.current }}</span>
+            <button v-if="up.status === 'downloaded'" class="btn primary" @click="installUpdate">重启并安装</button>
+            <button v-else class="btn" :disabled="up.checking || up.status === 'downloading'" @click="checkUpdate">
+              {{ up.checking ? '检查中…' : '检查更新' }}
+            </button>
+          </div>
+        </div>
+        <div v-if="upText" class="up-status">{{ upText }}</div>
         <div v-if="error" class="inline-error">{{ error }}</div>
       </div>
       <div class="dlg-foot">
@@ -225,4 +289,5 @@ function relaunch(): void {
   color: var(--ok);
   font-size: 12.5px;
 }
+.up-status{font-size:12px;color:var(--text-faint);margin-top:2px}.ver-label{font-size:12.5px;color:var(--text-dim);font-variant-numeric:tabular-nums}
 </style>

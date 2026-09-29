@@ -114,6 +114,16 @@ export interface MvApi {
   }
   onLibChanged(cb: (e: { upserted: Asset[]; removed: number[] }) => void): () => void
   onCollections(cb: () => void): () => void
+  updater: {
+    check(): Promise<{
+      status: string
+      version: string | null
+      progress: number | null
+      error: string | null
+      current: string
+    }>
+    install(): Promise<boolean>
+  }
 }
 
 /** 把 Vue 响应式代理转换为可结构化克隆的普通对象 */
@@ -209,6 +219,10 @@ const api: MvApi = {
   app: {
     relaunch: () => ipcRenderer.invoke('app:relaunch'),
     quit: () => ipcRenderer.invoke('app:quit')
+  },
+  updater: {
+    check: () => ipcRenderer.invoke('up:check'),
+    install: () => ipcRenderer.invoke('up:install')
   },
   onLibChanged(cb) {
     const fn = (_e: IpcRendererEvent, e: { upserted: Asset[]; removed: number[] }): void => cb(e)
