@@ -138,12 +138,29 @@ const dims = computed<MenuDim[]>(() => {
 const openKey = ref<string | null>(null)
 const popX = ref(0)
 const popY = ref(0)
+/** 更多筛选清单(其余维度收纳) */
+const moreOpen = ref(false)
+const moreX = ref(0)
+const moreY = ref(0)
+function toggleMore(e: MouseEvent): void {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  moreX.value = r.left
+  moreY.value = r.bottom + 6
+  moreOpen.value = !moreOpen.value
+}
+/** 常用维度直接平铺,其余收进「更多筛选」(参考 Png-Viewer) */
+const COMMON = ['formats', 'shape', 'rating', 'colors']
 
 function openDim(key: string, e: MouseEvent): void {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
   popX.value = r.left
   popY.value = r.bottom + 6
   openKey.value = key
+}
+
+function openMoreDim(key: string, e: MouseEvent): void {
+  moreOpen.value = false
+  openDim(key, e)
 }
 
 const openDimDef = computed(() => dims.value.find((d) => d.key === openKey.value))
@@ -167,18 +184,27 @@ function hasActive(key: string): boolean {
 </script>
 
 <template>
-  <!-- 平时不展开:只有漏斗展开或已有激活条件(chips)时才占位 -->
-  <div v-if="ui.page === 'library' && (ui.filterPanelOpen || chips.length)" class="filterbar">
-    <div v-if="ui.filterPanelOpen" class="dim-row">
-      <Icon name="filter" :size="13" />
+  <!-- Png-Viewer 式:常用筛选常驻一行,其余收进「更多筛选」,已选条件以标签展示 -->
+  <div v-if="ui.page === 'library'" class="filterbar">
+    <div class="dim-row">
+      <template v-for="d in dims" :key="d.key">
+        <button
+          v-if="COMMON.includes(d.key)"
+          class="dim-btn"
+          :class="{ active: hasActive(d.key), open: openKey === d.key }"
+          @click="openDim(d.key, $event)"
+        >
+          {{ d.label }}
+          <Icon name="chevron-down" :size="11" />
+        </button>
+      </template>
       <button
-        v-for="d in dims"
-        :key="d.key"
         class="dim-btn"
-        :class="{ active: hasActive(d.key), open: openKey === d.key }"
-        @click="openDim(d.key, $event)"
+        :class="{ open: moreOpen }"
+        title="其余筛选条件"
+        @click="toggleMore($event)"
       >
-        {{ d.label }}
+        更多筛选
         <Icon name="chevron-down" :size="11" />
       </button>
     </div>
@@ -197,7 +223,21 @@ function hasActive(key: string): boolean {
     </div>
 
     <Teleport to="body">
-      <div v-if="openKey" class="popover-backdrop" @mousedown="openKey = null" @contextmenu.prevent />
+      <div v-if="openKey || moreOpen" class="popover-backdrop" @mousedown="openKey = null; moreOpen = false" @contextmenu.prevent />
+      <div v-if="moreOpen" class="popover" :style="{ left: moreX + 'px', top: moreY + 'px' }">
+        <div class="popover-label">更多筛选</div>
+        <div
+          v-for="d in dims.filter((x) => !COMMON.includes(x.key))"
+          :key="d.key"
+          class="popover-item"
+          :class="{ active: hasActive(d.key) }"
+          @click="openMoreDim(d.key, $event)"
+        >
+          {{ d.label }}
+          <Icon v-if="hasActive(d.key)" name="check" :size="13" style="margin-left: auto" />
+          <Icon v-else name="chevron-right" :size="13" style="margin-left: auto" />
+        </div>
+      </div>
       <div v-if="openKey && openDimDef" class="popover" :style="{ left: popX + 'px', top: popY + 'px' }">
         <template v-if="openDimDef.items.length">
           <div

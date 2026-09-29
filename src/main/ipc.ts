@@ -6,6 +6,7 @@ import { getMainWindow } from './window'
 import { getSettings, setSettings, getAppearance, setAppearance } from './services/settings'
 import { migrateLibrary, libraryRoot } from './services/library'
 import { moveToTrash, restoreFromTrash, deleteForever } from './services/trash'
+import { shell } from 'electron'
 import { relocateAsset } from './services/relocate'
 import { findSimilarPairs } from './services/phash'
 import { exportAssets, type ExportOptions } from './services/exporter'
@@ -186,6 +187,11 @@ export function registerIpc(): void {
   ipcMain.handle('assets:exportBatch', (_e, args: { ids: number[]; opts: ExportOptions }) =>
     exportAssets(args.ids, args.opts)
   )
+  ipcMain.handle('assets:showInFolder', (_e, id: number) => {
+    const row = getAssetRow(id)
+    if (!row) throw new Error('素材不存在')
+    shell.showItemInFolder(row.file_path)
+  })
 
   // ---- 标签 ----
   ipcMain.handle('tags:create', (_e, nameRaw: string) => {

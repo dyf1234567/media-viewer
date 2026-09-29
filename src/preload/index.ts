@@ -58,6 +58,7 @@ export interface MvApi {
       ids: number[],
       opts: { dir: string; mode: 'copy' | 'convert'; format?: 'png' | 'jpg' | 'webp'; quality?: number }
     ): Promise<{ ok: number; total: number; files: string[]; errors: string[] }>
+    showInFolder(id: number): Promise<void>
   }
   tags: {
     create(name: string): Promise<Tag>
@@ -173,6 +174,7 @@ const api: MvApi = {
     convertToManaged: (ids) => ipcRenderer.invoke('assets:convertToManaged', plain(ids)),
     findSimilar: (threshold) => ipcRenderer.invoke('assets:findSimilar', threshold),
     exportBatch: (ids, opts) => ipcRenderer.invoke('assets:exportBatch', { ids: plain(ids), opts }),
+    showInFolder: (id) => ipcRenderer.invoke('assets:showInFolder', id),
     rebuildThumb: (id) => ipcRenderer.invoke('thumbs:rebuild', id)
   },
   tags: {

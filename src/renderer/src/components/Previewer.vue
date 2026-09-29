@@ -304,21 +304,21 @@ const zoomPct = computed(() => Math.round(view.scale * 100))
       <VideoPlayer v-else :key="asset.id" :asset="asset" />
     </div>
 
-    <!-- 顶部信息 -->
-    <div class="top-bar">
+    <!-- 顶部工具栏(Png-Viewer 式单栏:返回 | 信息 | 翻页 | 缩放 | 动作) -->
+    <div class="top-bar viewer-toolbar" :class="{ disabled: saving }">
+      <button class="pb-btn" title="返回(Esc)" :disabled="saving" @click="close">
+        <Icon name="chevron-left" :size="16" />
+      </button>
       <span class="pv-name" :title="asset.fileName">{{ asset.fileName }}</span>
-      <span class="pv-page" v-if="playlist.length">{{ index + 1 }} / {{ playlist.length }}</span>
+      <span v-if="playlist.length" class="pv-page">{{ index + 1 }} / {{ playlist.length }}</span>
       <span v-if="asset.kind === 'image'" class="pv-dim">{{ natural.w }} × {{ natural.h }}</span>
-    </div>
-
-    <!-- 底部控制 -->
-    <div class="bottom-bar" :class="{ disabled: saving }">
+      <span class="tb-flex" />
       <template v-if="asset.kind === 'image'">
         <button class="pb-btn" title="上一张(←)" :disabled="saving" @click="step(-1)">
-          <Icon name="arrow-left" :size="16" />
+          <Icon name="arrow-left" :size="15" />
         </button>
         <button class="pb-btn" title="下一张(→)" :disabled="saving" @click="step(1)">
-          <Icon name="arrow-right" :size="16" />
+          <Icon name="arrow-right" :size="15" />
         </button>
         <span class="bar-sep" />
         <button class="pb-btn" title="缩小(-)" @click="stepZoom(1 / 1.2)">
@@ -423,6 +423,13 @@ const zoomPct = computed(() => Math.round(view.scale * 100))
   background: linear-gradient(rgba(0, 0, 0, 0.5), transparent);
   pointer-events: none;
 }
+.viewer-toolbar {
+  gap: 4px;
+}
+.tb-flex {
+  flex: 1;
+}
+
 .pv-name {
   flex: 1;
   min-width: 0;

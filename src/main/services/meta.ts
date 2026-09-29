@@ -182,18 +182,6 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
   const params: Record<string, string> = {}
   const models: string[] = []
 
-  const knownSamplers = [
-    'euler',
-    'euler_ancestral',
-    'heun',
-    'dpm_2',
-    'lms',
-    'dpm_fast',
-    'dpm_adaptive',
-    'ddim',
-    'uni_pc',
-    'euler_ancestral'
-  ]
   const samplerAliases: Record<string, string> = {
     euler_ancestral: 'euler a',
     dpm_2_ancestral: 'DPM2 a',
@@ -202,6 +190,19 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
     dpmpp_3m_sde: 'DPM++ 3M SDE',
     dpmpp_sde: 'DPM++ SDE',
     heunpp2: 'Heun++'
+  }
+
+  /** API 图里 inputs 的值可能是 ["节点id", 槽位] 引用,取被引用节点的 text */
+  const textOfRef = (
+    graph: Record<string, { class_type: string; inputs: Record<string, unknown> }>,
+    ref: unknown
+  ): string | null => {
+    if (Array.isArray(ref) && ref.length >= 1) {
+      const node = graph[String(ref[0])]
+      const t = node?.inputs?.['text']
+      if (typeof t === 'string' && t.trim()) return t
+    }
+    return null
   }
 
   try {
@@ -235,14 +236,52 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
             params['Sampler'] = samplerAliases[sn] ?? sn
           }
           if (typeof inp['denoise'] === 'number') params['Denoise'] = String(inp['denoise'])
+          // 正负提示词从采样器的连线精确回溯(ComfyUI 里顺序不固定)
+          const pos = textOfRef(graph, inp['positive'])
+          const neg = textOfRef(graph, inp['negative'])
+          if (pos && !prompt) prompt = pos
+          if (neg && !negative) negative = neg
         }
       }
-      // 简单启发:第一条为正向,第二条为负向
-      if (texts.length) prompt = texts[0]
-      if (texts.length > 1) negative = texts.slice(1).join('\n')
+      // 回溯失败时退回顺序启发:第一条为正向,其余为负向
+      if (!prompt && texts.length) prompt = texts[0]
+      if (!negative && texts.length > 1 && prompt === texts[0]) negative = texts.slice(1).join('\n')
     }
   } catch {
     /* JSON 解析失败则按原文保存 */
+  }
+
+  // 只有 workflow(UI 格式,nodes 数组)没有 API prompt 时,从 widgets_values 提取
+  if ((!prompt || models.length === 0) && workflowText) {
+    try {
+      const wf = JSON.parse(workflowText) as {
+        nodes?: { type?: string; widgets_values?: unknown[] }[]
+      }
+      const wfTexts: string[] = []
+      for (const node of wf.nodes ?? []) {
+        const t = (node.type ?? '').toLowerCase()
+        const w = node.widgets_values
+        if (!Array.isArray(w)) continue
+        if (t.includes('cliptextencode') && typeof w[0] === 'string') {
+          wfTexts.push(w[0])
+        } else if (t.includes('checkpointloader') && typeof w[0] === 'string') {
+          if (!models.includes(w[0])) models.push(w[0])
+        } else if (t.includes('loraloader') && typeof w[0] === 'string') {
+          if (!models.includes(w[0])) models.push(w[0])
+        } else if (t.includes('ksampler')) {
+          // KSampler widgets 顺序:seed, control, steps, cfg, sampler, scheduler, denoise
+          if (typeof w[2] === 'number' && !params['Steps']) params['Steps'] = String(w[2])
+          if (typeof w[3] === 'number' && !params['CFG scale']) params['CFG scale'] = String(w[3])
+          if (typeof w[4] === 'string' && !params['Sampler']) {
+            params['Sampler'] = samplerAliases[w[4]] ?? w[4]
+          }
+        }
+      }
+      if (!prompt && wfTexts.length) prompt = wfTexts[0]
+      if (!negative && wfTexts.length > 1) negative = wfTexts.slice(1).join('\n')
+    } catch {
+      /* 忽略 */
+    }
   }
 
   let workflowPretty: string | null = null

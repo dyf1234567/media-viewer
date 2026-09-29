@@ -141,6 +141,11 @@ function isSelected(id: number): boolean {
 }
 
 function cardClick(a: Asset, e: MouseEvent): void {
+  // 右键菜单还开着时,本次点击只负责关菜单,不穿透选中(与点空白行为一致)
+  if (ctx.open) {
+    closeCtx()
+    return
+  }
   ui.detailsAssetId = a.id
   const mode = e.ctrlKey || e.metaKey ? 'toggle' : e.shiftKey ? 'range' : 'replace'
   ui.select(a.id, mode, orderedIds.value)
@@ -384,6 +389,30 @@ function closeCtx(): void {
   ctx.open = false
 }
 
+function ctxFav(): void {
+  const a = ctx.asset
+  closeCtx()
+  if (a) void toggleFav(a)
+}
+
+function ctxEdit(): void {
+  const a = ctx.asset
+  closeCtx()
+  if (a) ui.openEditor(a.id)
+}
+
+function ctxCopyPath(): void {
+  const a = ctx.asset
+  closeCtx()
+  if (a) void navigator.clipboard.writeText(a.filePath)
+}
+
+function ctxShowInFolder(): void {
+  const a = ctx.asset
+  closeCtx()
+  if (a) void window.mv.assets.showInFolder(a.id)
+}
+
 async function ctxToTrash(): Promise<void> {
   const ids = [...ui.selection]
   closeCtx()
@@ -435,10 +464,11 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
       @scroll.passive="onScroll"
       @mousedown="gridMouseDown"
     >
-      <!-- 瀑布流视图?-->
+      <!-- 瀑布流视图 -->
       <div
         v-if="ui.viewMode === 'waterfall' && items.length"
-        class="wf-canvas"
+        key="wf"
+        class="wf-canvas view-fade"
         :style="{ height: layout.totalH + 'px' }"
       >
         <div
@@ -472,6 +502,7 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
             <span v-if="v.asset.kind === 'video'" class="kind-badge">
               <Icon name="video" :size="11" />视频
             </span>
+            <div class="check-badge" aria-hidden="true"><Icon name="check" :size="13" /></div>
             <div class="hover-bar" @mousedown.stop @click.stop>
               <RatingStars
                 :model-value="v.asset.rating"
@@ -523,6 +554,7 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
           @dblclick="cardDblClick(v.asset)"
           @contextmenu="cardContextMenu(v.asset, $event)"
         >
+          <div class="check-badge row-check" aria-hidden="true"><Icon name="check" :size="12" /></div>
           <div class="cell thumb-cell">
             <template v-if="!v.asset.missing && v.asset.thumbDone === 1">
               <div class="skeleton list-skel" />
@@ -580,6 +612,20 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
         <div class="popover-item" @click="closeCtx(); cardDblClick(ctx.asset!)">
           <Icon name="eye" :size="14" /> 打开预览
         </div>
+        <div class="popover-item" @click="ctxFav">
+          <Icon name="heart" :size="14" :filled="ctx.asset?.favorite" />
+          {{ ctx.asset?.favorite ? '取消收藏' : '收藏' }}
+        </div>
+        <div v-if="ctx.asset?.kind === 'image' && !ctx.asset?.missing && !ui.isTrash" class="popover-item" @click="ctxEdit">
+          <Icon name="edit" :size="14" /> 编辑图片
+        </div>
+        <div class="popover-item" @click="ctxCopyPath">
+          <Icon name="copy" :size="14" /> 复制文件路径
+        </div>
+        <div class="popover-item" @click="ctxShowInFolder">
+          <Icon name="folder" :size="14" /> 在资源管理器中显示
+        </div>
+        <div class="popover-sep" />
         <div v-if="!tray.ids.includes(ctx.asset.id)" class="popover-item" @click="ctxCompare">
           <Icon name="compare" :size="14" /> 加入对比
         </div>
@@ -618,10 +664,55 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
   background: var(--panel);
   border: 1px solid var(--border);
   cursor: default;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color 0.15s, box-shadow 0.18s, transform 0.18s;
 }
 .card:hover {
   border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+}
+.card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(79, 124, 255, 0.22);
+}
+/* Eagle 式选中角标:弹性缩放出现 */
+.check-badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 4;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: scale(0);
+  opacity: 0;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.12s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.card.selected .check-badge,
+.row.selected .check-badge {
+  transform: scale(1);
+  opacity: 1;
+}
+.row-check {
+  position: static;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  box-shadow: none;
+  align-self: center;
+}
+.row .check-badge svg {
+  display: none;
+}
+.row.selected .check-badge svg {
+  display: block;
 }
 .card.selected {
   border-color: var(--accent);
