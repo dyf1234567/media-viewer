@@ -4,7 +4,7 @@ import { useUiStore, type SortKey } from '../stores/ui'
 import { useLibraryStore } from '../stores/library'
 import { useToastStore } from '../stores/toast'
 import { startImportConfirm } from '../composables/importFlow'
-import { scopeFilter, applyFilters, applySort } from '../util/pipeline'
+import { scopeFilter, applyFilters, applySort, countFilters } from '../util/pipeline'
 import Icon from './Icon.vue'
 
 const ui = useUiStore()
@@ -73,6 +73,7 @@ function thumbStep(delta: number): void {
 }
 
 const sortLabel = computed(() => SORTS.find((s) => s.key === ui.sortKey)?.label ?? '')
+const activeFilterCount = computed(() => countFilters(ui.filters))
 const sortMenuOpen = ref(false)
 const sortMenuX = ref(0)
 const sortMenuY = ref(0)
@@ -112,6 +113,15 @@ function closePopovers(): void {
 
     <!-- 排序 / 视图 / 缩略图大小:窗口够宽时与搜索同排,不够时整组换行并靠右,保持整齐 -->
     <div class="tb-group tb-right">
+      <button
+        class="vt-btn filter-toggle"
+        :class="{ active: ui.filterPanelOpen, 'has-filters': activeFilterCount > 0 }"
+        :title="activeFilterCount ? `${activeFilterCount} 个筛选条件生效,点击${ui.filterPanelOpen ? '收起' : '展开'}筛选` : (ui.filterPanelOpen ? '收起筛选' : '展开筛选')"
+        @click="ui.filterPanelOpen = !ui.filterPanelOpen"
+      >
+        <Icon name="filter" :size="14" />
+        <span v-if="activeFilterCount" class="filter-badge">{{ activeFilterCount }}</span>
+      </button>
       <button class="btn" :disabled="ui.isRandom" :title="ui.isRandom ? '随机浏览模式下排序已禁用' : '排序方式'" @click="openSortMenu">
         {{ sortLabel }}
         <Icon name="chevron-down" :size="12" />
@@ -246,6 +256,27 @@ function closePopovers(): void {
 }
 .popover-item .hint-inline {
   margin-left: auto;
+}
+/* 漏斗筛选按钮:激活条件时带数字角标 */
+.filter-toggle {
+  position: relative;
+}
+.filter-toggle.has-filters {
+  color: var(--accent);
+}
+.filter-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 13px;
+  height: 13px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+  padding: 0 3px;
 }
 .tb-search {
   flex: 1;

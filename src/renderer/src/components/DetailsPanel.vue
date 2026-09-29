@@ -38,6 +38,21 @@ watch(
   { immediate: true }
 )
 
+// 缓存快照跟随 store 同步:评分/收藏等更新走 patchLocal 或 lib:changed 换新对象,
+// 不合并的话 full 停留在首次选中时的快照,界面永远不刷新
+// 缓存快照跟随 store 同步:评分/收藏等更新走 patchLocal 或 lib:changed 换新对象,
+// 不合并的话 full 停留在首次选中时的快照,界面永远不刷新。
+// flush: sync 保证连续快速 toggle 时读到的 full 值也是最新的,不会反向
+watch(
+  () => (ui.detailsAssetId != null ? lib.byId.get(ui.detailsAssetId) : null),
+  (base) => {
+    if (!base) return
+    const cached = fullCache.get(base.id)
+    if (cached) Object.assign(cached, base)
+  },
+  { deep: true, flush: 'sync' }
+)
+
 // 未选中时的统计
 const stats = computed(() => {
   const scoped = scopeFilter(lib.assets, ui.scope, ui.scopeAlbumId, ui.randomIds)

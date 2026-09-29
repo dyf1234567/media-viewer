@@ -167,8 +167,9 @@ function hasActive(key: string): boolean {
 </script>
 
 <template>
-  <div v-if="ui.page === 'library'" class="filterbar">
-    <div class="dim-row">
+  <!-- 平时不展开:只有漏斗展开或已有激活条件(chips)时才占位 -->
+  <div v-if="ui.page === 'library' && (ui.filterPanelOpen || chips.length)" class="filterbar">
+    <div v-if="ui.filterPanelOpen" class="dim-row">
       <Icon name="filter" :size="13" />
       <button
         v-for="d in dims"
