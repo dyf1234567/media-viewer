@@ -11,9 +11,9 @@ const ui = useUiStore()
 const lib = useLibraryStore()
 const toast = useToastStore()
 
-const importMenuOpen = ref(false)
-const importMenuX = ref(0)
-const importMenuY = ref(0)
+const plusMenuOpen = ref(false)
+const plusMenuX = ref(0)
+const plusMenuY = ref(0)
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'imported', label: '导入顺序' },
@@ -24,15 +24,15 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'modified', label: '最近修改' }
 ]
 
-function openImportMenu(e: MouseEvent): void {
+function openPlusMenu(e: MouseEvent): void {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  importMenuX.value = r.left
-  importMenuY.value = r.bottom + 6
-  importMenuOpen.value = true
+  plusMenuX.value = r.left
+  plusMenuY.value = r.bottom + 6
+  plusMenuOpen.value = true
 }
 
 async function pickFiles(mode: 'reference' | 'managed'): Promise<void> {
-  importMenuOpen.value = false
+  plusMenuOpen.value = false
   const files = await window.mv.dialog.pickFiles()
   if (!files.length) return
   startImportConfirm(
@@ -42,6 +42,7 @@ async function pickFiles(mode: 'reference' | 'managed'): Promise<void> {
 }
 
 async function pickDirs(): Promise<void> {
+  plusMenuOpen.value = false
   const dirs = await window.mv.dialog.pickDirs()
   if (!dirs.length) return
   startImportConfirm(
@@ -82,38 +83,17 @@ function openSortMenu(e: MouseEvent): void {
   sortMenuOpen.value = true
 }
 
-// 更多菜单:低频操作收纳,避免工具栏拥挤
-const moreMenuOpen = ref(false)
-const moreMenuX = ref(0)
-const moreMenuY = ref(0)
-function openMoreMenu(e: MouseEvent): void {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  moreMenuX.value = r.left
-  moreMenuY.value = r.bottom + 6
-  moreMenuOpen.value = true
-}
-
 function closePopovers(): void {
-  importMenuOpen.value = false
+  plusMenuOpen.value = false
   sortMenuOpen.value = false
-  moreMenuOpen.value = false
 }
 </script>
 
 <template>
   <div class="toolbar">
     <div class="tb-group">
-      <button class="btn primary" @click="openImportMenu">
-        <Icon name="upload" :size="14" />
-        导入素材
-      </button>
-      <button class="btn" title="选择目录递归扫描入库,自动创建同名相册" @click="pickDirs">
-        <Icon name="folder-plus" :size="14" />
-        添加目录
-      </button>
-      <button class="btn" title="随机浏览、查找相似图片等更多操作" @click="openMoreMenu">
-        更多
-        <Icon name="chevron-down" :size="12" />
+      <button class="plus-btn" title="导入素材、添加目录、随机浏览、查找相似图片…" @click="openPlusMenu">
+        <Icon name="plus" :size="17" />
       </button>
     </div>
 
@@ -177,9 +157,9 @@ function closePopovers(): void {
     </div>
 
     <Teleport to="body">
-      <div v-if="importMenuOpen || sortMenuOpen" class="popover-backdrop" @mousedown="closePopovers" @contextmenu.prevent />
-      <div v-if="importMenuOpen" class="popover" :style="{ left: importMenuX + 'px', top: importMenuY + 'px' }">
-        <div class="popover-label">选择导入方式</div>
+      <div v-if="plusMenuOpen || sortMenuOpen" class="popover-backdrop" @mousedown="closePopovers" @contextmenu.prevent />
+      <div v-if="plusMenuOpen" class="popover" :style="{ left: plusMenuX + 'px', top: plusMenuY + 'px' }">
+        <div class="popover-label">导入</div>
         <div class="popover-item" @click="pickFiles('reference')">
           <Icon name="upload" :size="14" />
           引用原文件          <span class="hint-inline">不复制、不改动原文件</span>
@@ -187,6 +167,26 @@ function closePopovers(): void {
         <div class="popover-item" @click="pickFiles('managed')">
           <Icon name="save" :size="14" />
           存进库          <span class="hint-inline">复制一份纳入图库管理</span>
+        </div>
+        <div class="popover-item" @click="pickDirs()">
+          <Icon name="folder-plus" :size="14" />
+          添加目录          <span class="hint-inline">递归扫描,自动建同名相册</span>
+        </div>
+        <div class="popover-sep" />
+        <div class="popover-label">浏览</div>
+        <div class="popover-item" :class="{ disabled: ui.isRandom }" @click="!ui.isRandom && (randomBrowse(), closePopovers())">
+          <Icon name="shuffle" :size="14" />
+          随机浏览
+          <span class="hint-inline">打乱当前范围,取前 50 张</span>
+        </div>
+        <div class="popover-item" @click="ui.similarOpen = true; closePopovers()">
+          <Icon name="search" :size="14" />
+          查找相似图片
+          <span class="hint-inline">按感知指纹比对全库</span>
+        </div>
+        <div v-if="ui.isRandom" class="popover-item" @click="ui.setScope('all'); closePopovers()">
+          <Icon name="x" :size="14" />
+          退出随机浏览
         </div>
       </div>
       <div v-if="sortMenuOpen" class="popover" :style="{ left: sortMenuX + 'px', top: sortMenuY + 'px' }">
@@ -198,20 +198,6 @@ function closePopovers(): void {
           @click="ui.sortKey = s.key; closePopovers()"
         >
           {{ s.label }}
-        </div>
-      </div>
-      <div v-if="moreMenuOpen" class="popover" :style="{ left: moreMenuX + 'px', top: moreMenuY + 'px' }">
-        <div class="popover-item" :class="{ disabled: ui.isRandom }" @click="!ui.isRandom && (randomBrowse(), closePopovers())">
-          <Icon name="shuffle" :size="14" />
-          随机浏览(取前 50 张)
-        </div>
-        <div v-if="ui.isRandom" class="popover-item" @click="ui.setScope('all'); closePopovers()">
-          <Icon name="x" :size="14" />
-          退出随机浏览
-        </div>
-        <div class="popover-item" @click="ui.similarOpen = true; closePopovers()">
-          <Icon name="search" :size="14" />
-          查找相似图片
         </div>
       </div>
     </Teleport>
@@ -235,10 +221,36 @@ function closePopovers(): void {
 .tb-right {
   margin-left: auto;
 }
+/* 圆形主操作按钮(Apple Photos 风格):所有导入/浏览操作收进加号菜单 */
+.plus-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  flex: none;
+}
+.plus-btn:hover {
+  filter: brightness(1.12);
+}
+.plus-btn:active {
+  transform: scale(0.94);
+}
+.popover-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 5px 8px;
+}
+.popover-item .hint-inline {
+  margin-left: auto;
+}
 .tb-search {
   flex: 1;
-  min-width: 150px;
-  max-width: 340px;
+  min-width: 120px;
+  max-width: 250px;
   display: flex;
   align-items: center;
   gap: 8px;

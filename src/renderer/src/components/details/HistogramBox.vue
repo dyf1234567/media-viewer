@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { HistogramData } from '@sh/types'
 import Icon from '../Icon.vue'
 
@@ -40,7 +40,21 @@ const stat = computed(() => {
   return data.value.stats[mode.value]
 })
 
-watch([data, mode], draw)
+// 数据就绪后 canvas 才随 v-else 渲染,必须等 DOM 更新完再画,否则拿不到元素画不出来
+watch([data, mode], async () => {
+  await nextTick()
+  draw()
+})
+
+// 画布出现/尺寸变化(详情面板宽度调整)时重绘,避免拉伸模糊
+let ro: ResizeObserver | null = null
+watch(canvasEl, (cv) => {
+  if (!cv) return
+  ro?.disconnect()
+  ro = new ResizeObserver(() => draw())
+  ro.observe(cv)
+})
+onBeforeUnmount(() => ro?.disconnect())
 
 function draw(): void {
   const cv = canvasEl.value
