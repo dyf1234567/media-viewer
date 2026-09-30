@@ -1,6 +1,6 @@
 {
   "name": "media-viewer",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Media Viewer - 本地图片/视频素材库管理器",
   "main": "./out/main/index.js",
   "author": "Media Viewer",

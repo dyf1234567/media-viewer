@@ -176,7 +176,7 @@ function parseA1111(text: string): AiMeta {
 }
 
 /** 解析 ComfyUI 工作流导出 */
-function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
+export function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
   let prompt: string | null = null
   let negative: string | null = null
   const params: Record<string, string> = {}
@@ -192,20 +192,33 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
     heunpp2: 'Heun++'
   }
 
+  interface GNode {
+    class_type: string
+    inputs?: Record<string, unknown>
+  }
+  type Graph = Record<string, GNode>
+
   /** 文本编码节点识别:CLIPEncodeXxx / TextEncodeQwenImage21 / WanVideoTextEncode 等都覆盖 */
   const isTextNode = (ct: string): boolean => /cliptextencode|textencode/i.test(ct)
+  /** 采样节点:KSampler 系与 SamplerCustom 系 */
+  const isSamplerNode = (node: GNode): boolean => {
+    const c = node.class_type.toLowerCase()
+    return c.includes('ksampler') || c.includes('samplercustom')
+  }
+  /** 保存/预览节点:图像从这里落地,是回溯的起点 */
+  const isSaveNode = (ct: string): boolean => /^(save|preview)/i.test(ct) || /videocombine/i.test(ct)
 
-  const posTextOf = (node: { inputs?: Record<string, unknown> }): string | null => {
+  const posTextOf = (node: GNode): string | null => {
     const inp = node.inputs ?? {}
-    for (const k of ['prompt', 'text', 'text_pos', 'texts']) {
+    for (const k of ['prompt', 'text', 'text_pos', 'texts', 'positive_prompt', 'populated_text', 'wildcard_text']) {
       const v = inp[k]
-      if (typeof v === 'string' && v.trim()) return v
+      if (typeof v === 'string' && v.trim()) return v.trim()
     }
     return null
   }
-  const negTextOf = (node: { inputs?: Record<string, unknown> }): string | null => {
+  const negTextOf = (node: GNode): string | null => {
     const inp = node.inputs ?? {}
-    const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
+    const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
     const explicit = str(inp['negative_prompt']) ?? str(inp['negative']) ?? str(inp['text_neg']) ?? str(inp['neg'])
     if (explicit) return explicit
     // 双键节点(prompt/negative_prompt 型)负向为空就是空,不能兜底取正向文本
@@ -214,77 +227,221 @@ function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
     return str(inp['text']) ?? str(inp['prompt'])
   }
 
-  /** 沿引用递归找文本编码节点(可穿过 ConditioningCombine 等中间节点) */
-  const traceTextNode = (
-    graph: Record<string, { class_type: string; inputs: Record<string, unknown> }>,
-    ref: unknown,
-    depth = 0
-  ): { class_type: string; inputs: Record<string, unknown> } | null => {
-    if (depth > 6 || !Array.isArray(ref)) return null
-    const node = graph[String(ref[0])]
+  /** 文本可能由上游字符串节点拼出(StringConcat / Primitive / 通配符处理器):沿字符串引用收集 */
+  const followStringRefs = (graph: Graph, id: string, depth: number, seen: Set<string>, out: string[]): void => {
+    if (depth > 8 || seen.has(id)) return
+    seen.add(id)
+    const node = graph[id]
+    if (!node) return
+    for (const [k, v] of Object.entries(node.inputs ?? {})) {
+      if (/neg/i.test(k)) continue
+      if (typeof v === 'string' && v.trim() && /string|text|prompt|value/i.test(k)) {
+        if (!out.includes(v)) out.push(v)
+      } else if (Array.isArray(v) && /string|text|prompt/i.test(k)) {
+        followStringRefs(graph, String(v[0]), depth + 1, seen, out)
+      }
+    }
+  }
+
+  /**
+   * 取节点在某方向上的提示词文本:先读直连字串,不是字串则按方向沿对应键的引用打捞
+   * (LLM 生成节点 / StringConcat 拼接 / Primitive 值等场景)。
+   */
+  const fishText = (graph: Graph, node: GNode, dir: 'pos' | 'neg'): string | null => {
+    const direct = dir === 'pos' ? posTextOf(node) : negTextOf(node)
+    if (direct) return direct
+    const inp = node.inputs ?? {}
+    const hasDual = 'negative_prompt' in inp || 'text_neg' in inp
+    const strKeys =
+      dir === 'pos'
+        ? ['prompt', 'text', 'text_pos', 'texts', 'positive_prompt']
+        : ['negative_prompt', 'negative', 'text_neg', 'neg']
+    if (dir === 'neg' && !hasDual) strKeys.push('text', 'prompt')
+    const parts: string[] = []
+    for (const k of strKeys) {
+      const v = inp[k]
+      if (Array.isArray(v)) followStringRefs(graph, String(v[0]), 0, new Set(), parts)
+    }
+    return parts.join('\n') || null
+  }
+
+  /**
+   * 沿条件(Conditioning)引用收集该方向上的全部提示词文本。
+   * 一个流的正/负向可能由 ConditioningCombine/Concat 合并多个文本编码节点组成,
+   * 这里把整棵条件子树走完、按方向取文本,而不是只取第一个命中的节点。
+   */
+  const collectCond = (graph: Graph, ref: unknown, dir: 'pos' | 'neg', depth: number, seen: Set<string>, out: string[]): void => {
+    if (depth > 16 || !Array.isArray(ref)) return
+    const id = String(ref[0])
+    if (seen.has(id)) return
+    seen.add(id)
+    const node = graph[id]
+    if (!node) return
+    const ct = node.class_type
+    if (isTextNode(ct)) {
+      const t = fishText(graph, node, dir)
+      if (t && !out.includes(t)) out.push(t)
+      return
+    }
+    // 负向置零 = 空条件,不能穿透(否则会把正向文本错当负向)
+    if (/conditioningzeroout/i.test(ct)) return
+    // 泛化:条件子树里任何能取到提示词文本的节点都视为文本源
+    // (MiniMaxH3ReferenceToVideo 等非标准编码节点,prompt 是直连字符串而非独立文本节点)
+    const t = fishText(graph, node, dir)
+    if (t) {
+      if (!out.includes(t)) out.push(t)
+      return
+    }
+    for (const [k, v] of Object.entries(node.inputs ?? {})) {
+      if (Array.isArray(v) && /cond|positive|negative|prompt|text/i.test(k)) {
+        collectCond(graph, v, dir, depth + 1, seen, out)
+      }
+    }
+  }
+
+  /** 从保存节点沿图像链回溯到产出这张图的采样器(链式 refine 时是最末一级) */
+  const backToSampler = (graph: Graph, id: string, depth: number, seen: Set<string>): GNode | null => {
+    if (depth > 32 || seen.has(id)) return null
+    seen.add(id)
+    const node = graph[id]
     if (!node) return null
-    if (isTextNode(node.class_type)) return node
-    for (const k of ['positive', 'negative', 'conditioning', 'conditioning_1', 'conditioning_2']) {
-      const n = traceTextNode(graph, node.inputs?.[k], depth + 1)
-      if (n) return n
+    if (isSamplerNode(node)) return node
+    const pri = ['samples', 'latent_image', 'image', 'images', 'latent']
+    const keys = Object.keys(node.inputs ?? {})
+    const ordered = [...pri.filter((k) => keys.includes(k)), ...keys.filter((k) => !pri.includes(k))]
+    for (const k of ordered) {
+      const v = node.inputs?.[k]
+      if (Array.isArray(v)) {
+        const r = backToSampler(graph, String(v[0]), depth + 1, seen)
+        if (r) return r
+      }
     }
     return null
   }
 
+  /** KSampler / KSamplerAdvanced / SamplerCustom(+Guider+Scheduler) 的采样参数 */
+  const readSamplerParams = (graph: Graph, sm: GNode): void => {
+    const inp = sm.inputs ?? {}
+    const ct = sm.class_type.toLowerCase()
+    if (typeof inp['steps'] === 'number') params['Steps'] = String(inp['steps'])
+    if (typeof inp['cfg'] === 'number') params['CFG scale'] = String(inp['cfg'])
+    if (typeof inp['seed'] === 'number') params['Seed'] = String(inp['seed'])
+    else if (typeof inp['noise_seed'] === 'number') params['Seed'] = String(inp['noise_seed'])
+    const sn = inp['sampler_name']
+    if (typeof sn === 'string') params['Sampler'] = samplerAliases[sn] ?? sn
+    if (typeof inp['denoise'] === 'number') params['Denoise'] = String(inp['denoise'])
+    if (ct.includes('samplercustom')) {
+      // SamplerCustom:CFG 在 Guider 上,步数/去噪在 Scheduler 上,采样器名在 KSamplerSelect 上
+      const ref = (v: unknown): GNode | null => (Array.isArray(v) ? graph[String(v[0])] ?? null : null)
+      const g = ref(inp['guider'])
+      if (g && typeof g.inputs?.['cfg'] === 'number' && !params['CFG scale']) {
+        params['CFG scale'] = String(g.inputs['cfg'])
+      }
+      const sg = ref(inp['sigmas'])
+      if (sg) {
+        const st = sg.inputs?.['steps'] ?? sg.inputs?.['nsteps']
+        if (typeof st === 'number' && !params['Steps']) params['Steps'] = String(st)
+        const dz = sg.inputs?.['denoise']
+        if (typeof dz === 'number' && !params['Denoise']) params['Denoise'] = String(dz)
+      }
+      const sel = ref(inp['sampler'])
+      const selName = sel?.inputs?.['sampler_name']
+      if (typeof selName === 'string' && !params['Sampler']) params['Sampler'] = samplerAliases[selName] ?? selName
+    }
+  }
+
   try {
     if (promptText) {
-      const graph = JSON.parse(promptText) as Record<
-        string,
-        { class_type: string; inputs: Record<string, unknown> }
-      >
+      const graph = JSON.parse(promptText) as Graph
       const texts: string[] = []
       for (const node of Object.values(graph)) {
         const ct = node.class_type.toLowerCase()
         if (isTextNode(ct)) {
-          // Qwen 型节点自带 prompt/negative_prompt 双键,直接读
           const p = posTextOf(node)
           const ng = negTextOf(node)
-          if (p && !prompt) prompt = p
-          if (ng && !negative) negative = ng
           if (p) texts.push(p)
-          if (ng) texts.push(ng)
+          // 单键节点的负向兜底就是正向文本本身,收集时去重,避免顺序启发把正向错当负向
+          if (ng && ng !== p) texts.push(ng)
         }
         if (ct.includes('checkpointloader')) {
-          const m = node.inputs['ckpt_name']
+          const m = node.inputs?.['ckpt_name']
           if (typeof m === 'string') models.push(m)
         }
         if (ct.includes('unetloader') || ct.includes('loraloader')) {
-          const m = node.inputs['unet_name'] ?? node.inputs['lora_name']
+          const m = node.inputs?.['unet_name'] ?? node.inputs?.['lora_name']
           if (typeof m === 'string') models.push(m)
         }
-        if (ct.includes('ksampler') || ct.includes('samplercustom')) {
-          const inp = node.inputs
-          if (typeof inp['steps'] === 'number') params['Steps'] = String(inp['steps'])
-          if (typeof inp['cfg'] === 'number') params['CFG scale'] = String(inp['cfg'])
-          if (typeof inp['seed'] === 'number') params['Seed'] = String(inp['seed'])
-          const sn = inp['sampler_name']
-          if (typeof sn === 'string') {
-            params['Sampler'] = samplerAliases[sn] ?? sn
-          }
-          if (typeof inp['denoise'] === 'number') params['Denoise'] = String(inp['denoise'])
-        }
-        // 正负提示词从采样/引导节点的连线精确回溯(新 ComfyUI 可能挂在 Guider 上,顺序不固定)
-        if ('positive' in node.inputs || 'negative' in node.inputs) {
-          const posNode = traceTextNode(graph, node.inputs['positive'])
-          const negNode = traceTextNode(graph, node.inputs['negative'])
-          if (posNode) {
-            const p = posTextOf(posNode)
-            if (p && !prompt) prompt = p
-          }
-          if (negNode) {
-            const ng = negTextOf(negNode)
-            if (ng && !negative) negative = ng
+      }
+
+      // 最终采样器:直接产出被保存图像的采样节点(A/B 对比流可能有多个,链式 refine 取末级)
+      const finalSamplers: GNode[] = []
+      for (const [id, node] of Object.entries(graph)) {
+        if (!isSaveNode(node.class_type)) continue
+        for (const v of Object.values(node.inputs ?? {})) {
+          if (Array.isArray(v)) {
+            const r = backToSampler(graph, String(v[0]), 0, new Set())
+            if (r && !finalSamplers.includes(r)) finalSamplers.push(r)
           }
         }
       }
-      // 回溯失败时退回顺序启发:第一条为正向,其余为负向
+      const samplerNodes = Object.values(graph).filter(isSamplerNode)
+      const targetSamplers = finalSamplers.length ? finalSamplers : samplerNodes
+
+      // 正/负向:沿最终采样器的条件连线整棵收集(KSampler 直接 positive/negative;SamplerCustom 经 Guider)
+      const posTexts: string[] = []
+      const negTexts: string[] = []
+      for (const sm of targetSamplers) {
+        const inp = sm.inputs ?? {}
+        if (Array.isArray(inp['positive'])) collectCond(graph, inp['positive'], 'pos', 0, new Set(), posTexts)
+        if (Array.isArray(inp['negative'])) collectCond(graph, inp['negative'], 'neg', 0, new Set(), negTexts)
+        const guider = Array.isArray(inp['guider']) ? graph[String(inp['guider'][0])] : null
+        if (guider) {
+          // BasicGuider(视频流常见)只有 conditioning 一个入口
+          for (const pk of ['conditional', 'positive', 'conditioning_1', 'conditioning']) {
+            if (Array.isArray(guider.inputs?.[pk])) collectCond(graph, guider.inputs[pk], 'pos', 0, new Set(), posTexts)
+          }
+          for (const nk of ['unconditional', 'negative', 'conditioning_2']) {
+            if (Array.isArray(guider.inputs?.[nk])) collectCond(graph, guider.inputs[nk], 'neg', 0, new Set(), negTexts)
+          }
+        }
+      }
+      if (posTexts.length) prompt = posTexts.join('\n')
+      if (negTexts.length) negative = negTexts.join('\n')
+
+      if (targetSamplers.length) readSamplerParams(graph, targetSamplers[0])
+
+      // 回溯失败时退回旧启发:任何带 positive/negative 的节点回溯单文本
+      if (!prompt || !negative) {
+        for (const node of Object.values(graph)) {
+          if (!node.inputs) continue
+          if (!prompt && Array.isArray(node.inputs['positive'])) {
+            const tn = graph[String(node.inputs['positive'][0])]
+            if (tn && isTextNode(tn.class_type)) {
+              const p = posTextOf(tn)
+              if (p) prompt = p
+            }
+          }
+          if (!negative && Array.isArray(node.inputs['negative'])) {
+            const tn = graph[String(node.inputs['negative'][0])]
+            if (tn && isTextNode(tn.class_type)) {
+              const ng = negTextOf(tn)
+              if (ng) negative = ng
+            }
+          }
+        }
+      }
+      // 仍失败时按顺序启发:第一条为正向,其余为负向
       if (!prompt && texts.length) prompt = texts[0]
       if (!negative && texts.length > 1 && prompt === texts[0]) negative = texts.slice(1).join('\n')
+      // 无采样器的工作流(如 GPT-Image 等 API 生图):取全图最长的提示词字串
+      if (!prompt && samplerNodes.length === 0) {
+        let longest: string | null = null
+        for (const node of Object.values(graph)) {
+          const p = posTextOf(node)
+          if (p && (!longest || p.length > longest.length)) longest = p
+        }
+        if (longest) prompt = longest
+      }
     }
   } catch {
     /* JSON 解析失败则按原文保存 */
