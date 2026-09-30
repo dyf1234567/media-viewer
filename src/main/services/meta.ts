@@ -175,6 +175,19 @@ function parseA1111(text: string): AiMeta {
   }
 }
 
+/** ComfyUI 导出偶发非法 JSON(如 "is_changed": [NaN]):严格解析失败后消毒重试 */
+function safeJsonParse<T>(text: string): T | null {
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    try {
+      return JSON.parse(text.replace(/\bNaN\b/g, 'null')) as T
+    } catch {
+      return null
+    }
+  }
+}
+
 /** 解析 ComfyUI 工作流导出 */
 export function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
   let prompt: string | null = null
@@ -352,8 +365,9 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
 
   try {
     if (promptText) {
-      const graph = JSON.parse(promptText) as Graph
-      const texts: string[] = []
+      const graph = safeJsonParse<Graph>(promptText)
+      if (graph) {
+        const texts: string[] = []
       for (const node of Object.values(graph)) {
         const ct = node.class_type.toLowerCase()
         if (isTextNode(ct)) {
@@ -442,6 +456,7 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
         }
         if (longest) prompt = longest
       }
+      }
     }
   } catch {
     /* JSON 解析失败则按原文保存 */
@@ -450,11 +465,10 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
   // 只有 workflow(UI 格式,nodes 数组)没有 API prompt 时,从 widgets_values 提取
   if ((!prompt || models.length === 0) && workflowText) {
     try {
-      const wf = JSON.parse(workflowText) as {
-        nodes?: { type?: string; widgets_values?: unknown[] }[]
-      }
-      const wfTexts: string[] = []
-      for (const node of wf.nodes ?? []) {
+      const wf = safeJsonParse<{ nodes?: { type?: string; widgets_values?: unknown[] }[] }>(workflowText)
+      if (wf) {
+        const wfTexts: string[] = []
+        for (const node of wf.nodes ?? []) {
         const t = (node.type ?? '').toLowerCase()
         const w = node.widgets_values
         if (!Array.isArray(w)) continue
@@ -475,6 +489,7 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
       }
       if (!prompt && wfTexts.length) prompt = wfTexts[0]
       if (!negative && wfTexts.length > 1) negative = wfTexts.slice(1).join('\n')
+      }
     } catch {
       /* 忽略 */
     }
@@ -482,11 +497,8 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
 
   let workflowPretty: string | null = null
   if (workflowText) {
-    try {
-      workflowPretty = JSON.stringify(JSON.parse(workflowText), null, 2)
-    } catch {
-      workflowPretty = workflowText
-    }
+    const pretty = safeJsonParse<unknown>(workflowText)
+    workflowPretty = pretty ? JSON.stringify(pretty, null, 2) : workflowText
   }
 
   return {

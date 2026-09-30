@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useUiStore } from '../stores/ui'
 import { useLibraryStore } from '../stores/library'
-import { activeFilterChips } from '../util/pipeline'
+import { activeFilterChips, parseRatio } from '../util/pipeline'
+import { classifyColor, hsvToRgb, rgbToHsv, rgbToHex, parseHex } from '../../../shared/colors'
 import Icon from './Icon.vue'
 
 const ui = useUiStore()
@@ -14,18 +15,14 @@ const SHAPES = [
   { v: 'v', label: '竖图' },
   { v: 'sq', label: '方形' }
 ]
-/** 与主进程 classify() 的 9 档色系一一对应 */
-const COLORS = [
-  { v: 'red', label: '红', dot: '#e05656' },
-  { v: 'orange', label: '橙', dot: '#e8862f' },
-  { v: 'yellow', label: '黄', dot: '#e3bd3a' },
-  { v: 'green', label: '绿', dot: '#4ecb71' },
-  { v: 'cyan', label: '青', dot: '#3ec6c0' },
-  { v: 'blue', label: '蓝', dot: '#5288ff' },
-  { v: 'purple', label: '紫', dot: '#9a6bff' },
-  { v: 'pink', label: '粉', dot: '#ef7fb2' },
-  { v: 'gray', label: '灰', dot: '#9a9aa2' }
-]
+/** 取色面板预设色块(与主进程色系分类同源):点击按色系切换筛选 */
+const PRESETS = [
+  '#FFFFFF', '#C9C9C9', '#8A8A8A', '#4A4A4A', '#151515', '#8B5E3C', '#F2B6C6', '#E0568C',
+  '#E03E3E', '#E8862F', '#E3C03A', '#4ECB71', '#3EC6C0', '#5288FF', '#9A6BFF', '#EA5BD8'
+].map((hex) => {
+  const c = parseHex(hex)!
+  return { hex, family: classifyColor(c.r, c.g, c.b) }
+})
 const RATINGS = [5, 4, 3, 2, 1, 0]
 const DATES = [
   { v: 1, label: '今天' },
@@ -104,7 +101,10 @@ const dims = computed<MenuDim[]>(() => {
         f.formats = f.formats.includes(s) ? f.formats.filter((x) => x !== s) : [...f.formats, s]
       }
     },
-    single('shape', '形状', SHAPES, () => f.shape, (v) => (f.shape = v as '' | 'h' | 'v' | 'sq')),
+    single('shape', '形状', SHAPES, () => f.shape, (v) => {
+      f.shapeCustom = ''
+      f.shape = v as '' | 'h' | 'v' | 'sq'
+    }),
     {
       key: 'tags',
       label: '标签',
@@ -131,11 +131,11 @@ const dims = computed<MenuDim[]>(() => {
       key: 'colors',
       label: '颜色',
       multi: true,
-      items: COLORS,
-      selected: (v) => f.colors.includes(String(v)),
+      items: [],
+      selected: (v) => ui.filters.colors.includes(String(v)),
       toggle: (v) => {
         const s = String(v)
-        f.colors = f.colors.includes(s) ? f.colors.filter((x) => x !== s) : [...f.colors, s]
+        ui.filters.colors = ui.filters.colors.includes(s) ? ui.filters.colors.filter((x) => x !== s) : [...ui.filters.colors, s]
       }
     },
     {
@@ -205,6 +205,7 @@ function hasActive(key: string): boolean {
   if (key === 'rating') return ui.filters.rating >= 0
   if (key === 'dateAdded') return !!ui.filters.dateAdded
   if (key === 'dateModified') return !!ui.filters.dateModified
+  if (key === 'shape') return !!ui.filters.shape || !!ui.filters.shapeCustom
   const v = (ui.filters as unknown as Record<string, unknown>)[key]
   if (Array.isArray(v)) return v.length > 0
   return !!v
@@ -217,13 +218,85 @@ function clearDim(key: string): void {
   else if (key === 'colors') f.colors = []
   else if (key === 'tags') f.tags = []
   else if (key === 'albums') f.albums = []
-  else if (key === 'shape') f.shape = ''
-  else if (key === 'rating') f.rating = -1
+  else if (key === 'shape') {
+    f.shape = ''
+    f.shapeCustom = ''
+  } else if (key === 'rating') f.rating = -1
   else if (key === 'dateAdded') f.dateAdded = 0
   else if (key === 'dateModified') f.dateModified = 0
   else if (key === 'note') f.note = ''
   else if (key === 'dimension') f.dimension = ''
   else if (key === 'size') f.size = ''
+}
+
+/* ===== Eagle 式取色面板 ===== */
+const pick = reactive({ h: 0, s: 1, v: 1 })
+const hexInput = ref('#FF0000')
+
+const pickedRgb = computed(() => hsvToRgb(pick.h, pick.s, pick.v))
+const pickedHex = computed(() => rgbToHex(pickedRgb.value.r, pickedRgb.value.g, pickedRgb.value.b))
+const svStyle = computed(() => ({
+  background: `linear-gradient(to top, #000, rgba(0, 0, 0, 0)), linear-gradient(to right, #fff, hsl(${pick.h}, 100%, 50%))`
+}))
+
+function syncHexInput(): void {
+  hexInput.value = pickedHex.value
+}
+function applyPicked(): void {
+  const family = classifyColor(pickedRgb.value.r, pickedRgb.value.g, pickedRgb.value.b)
+  if (family && !ui.filters.colors.includes(family)) ui.filters.colors = [...ui.filters.colors, family]
+}
+function svSet(e: PointerEvent): void {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  pick.s = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+  pick.v = 1 - Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
+  syncHexInput()
+}
+function svDown(e: PointerEvent): void {
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  svSet(e)
+}
+function svMove(e: PointerEvent): void {
+  if (e.buttons & 1) svSet(e)
+}
+function svUp(): void {
+  applyPicked()
+}
+function hueSet(e: PointerEvent): void {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  pick.h = Math.min(359.9, Math.max(0, ((e.clientY - r.top) / r.height) * 360))
+  syncHexInput()
+}
+function hueDown(e: PointerEvent): void {
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  hueSet(e)
+}
+function hueMove(e: PointerEvent): void {
+  if (e.buttons & 1) hueSet(e)
+}
+function applyHex(): void {
+  const c = parseHex(hexInput.value)
+  if (!c) return
+  const hsv = rgbToHsv(c.r, c.g, c.b)
+  pick.h = hsv.h
+  pick.s = hsv.s
+  pick.v = hsv.v
+  applyPicked()
+}
+function presetClick(family: string | null): void {
+  if (!family) return
+  ui.filters.colors = ui.filters.colors.includes(family)
+    ? ui.filters.colors.filter((x) => x !== family)
+    : [...ui.filters.colors, family]
+}
+
+/* ===== 形状自定义比例 ===== */
+const shapeCustomInput = ref('')
+function applyShapeCustom(): void {
+  if (parseRatio(shapeCustomInput.value) == null) return
+  ui.filters.shapeCustom = shapeCustomInput.value.trim()
+  ui.filters.shape = ''
+  openKey.value = null
 }
 </script>
 
@@ -287,19 +360,56 @@ function clearDim(key: string): void {
       </div>
       <div v-if="openKey && openDimDef" class="popover" :style="{ left: popX + 'px', top: popY + 'px' }">
         <div class="popover-label">{{ openDimDef.label }}</div>
-        <!-- 颜色:Eagle 式色板网格 -->
-        <div v-if="openKey === 'colors'" class="swatch-grid">
-          <button
-            v-for="item in openDimDef.items"
-            :key="String(item.v)"
-            class="swatch"
-            :class="{ sel: openDimDef.selected(item.v) }"
-            :title="item.label"
-            @click="openDimDef.toggle(item.v)"
-          >
-            <span class="sw-dot" :style="{ background: item.dot }" />
-            <span class="sw-name">{{ item.label }}</span>
-          </button>
+        <!-- 颜色:Eagle 式取色面板(SV 渐变方 + 色相条 + 预设色块 + hex 输入) -->
+        <div v-if="openKey === 'colors'" class="color-picker">
+          <div class="picker-main">
+            <div
+              class="sv-square"
+              :style="svStyle"
+              @pointerdown.prevent="svDown"
+              @pointermove="svMove"
+              @pointerup="svUp"
+            >
+              <span
+                class="sv-cursor"
+                :style="{ left: pick.s * 100 + '%', top: (1 - pick.v) * 100 + '%' }"
+              />
+            </div>
+            <div
+              class="hue-strip"
+              @pointerdown.prevent="hueDown"
+              @pointermove="hueMove"
+              @pointerup="svUp"
+            >
+              <span class="hue-cursor" :style="{ top: (pick.h / 360) * 100 + '%' }" />
+            </div>
+          </div>
+          <div class="preset-grid">
+            <button
+              v-for="p in PRESETS"
+              :key="p.hex"
+              class="preset"
+              :class="{ sel: p.family ? ui.filters.colors.includes(p.family) : false }"
+              :title="p.hex"
+              @click="presetClick(p.family)"
+            >
+              <span class="preset-dot" :style="{ background: p.hex }" />
+            </button>
+          </div>
+          <div class="hex-row">
+            <span class="hex-prev" :style="{ background: pickedHex }" />
+            <input
+              v-model="hexInput"
+              class="hex-input"
+              type="text"
+              spellcheck="false"
+              placeholder="#FF0000"
+              @keydown.enter="applyHex"
+            />
+            <button class="hex-apply" title="按此颜色筛选" @click="applyHex">
+              <Icon name="check" :size="13" />
+            </button>
+          </div>
         </div>
         <!-- 评分:星形行 -->
         <template v-else-if="openKey === 'rating'">
@@ -333,6 +443,20 @@ function clearDim(key: string): void {
             </div>
           </template>
           <div v-else class="popover-label">暂无可选项</div>
+          <!-- 形状:自定义比例 -->
+          <div v-if="openKey === 'shape'" class="custom-ratio">
+            <input
+              v-model="shapeCustomInput"
+              class="cr-input"
+              type="text"
+              spellcheck="false"
+              placeholder="自定义比例,如 16:9"
+              @keydown.enter="applyShapeCustom"
+            />
+            <button class="cr-apply" :disabled="parseRatio(shapeCustomInput) == null" title="应用自定义比例" @click="applyShapeCustom">
+              <Icon name="check" :size="13" />
+            </button>
+          </div>
         </template>
         <div v-if="hasActive(openKey)" class="pop-footer" @click="clearDim(openKey); openKey = null">
           <Icon name="x" :size="12" />
@@ -454,51 +578,161 @@ function clearDim(key: string): void {
   padding: 7px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
 }
-/* 颜色色板网格 */
-.swatch-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 2px;
+/* ===== Eagle 式取色面板 ===== */
+.color-picker {
+  width: 236px;
   padding: 2px;
-  min-width: 216px;
 }
-.swatch {
+.picker-main {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 4px 5px;
+  gap: 8px;
+  height: 150px;
+}
+.sv-square {
+  position: relative;
+  flex: 1;
   border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.sv-cursor {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.hue-strip {
+  position: relative;
+  width: 14px;
+  border-radius: 7px;
+  cursor: ns-resize;
+  touch-action: none;
+  background: linear-gradient(
+    to bottom,
+    #f00 0%,
+    #ff0 16.7%,
+    #0f0 33.3%,
+    #0ff 50%,
+    #00f 66.7%,
+    #f0f 83.3%,
+    #f00 100%
+  );
+}
+.hue-cursor {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 4px;
+  border-radius: 2px;
+  border: 1px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.preset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   background: transparent;
   border: none;
   cursor: pointer;
 }
-.swatch:hover {
-  background: var(--bg-glass);
+.preset-dot {
+  width: 21px;
+  height: 21px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
-.sw-dot {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-  transition: box-shadow 0.12s ease, transform 0.12s ease;
+.preset:hover .preset-dot {
+  transform: scale(1.12);
 }
-.swatch:hover .sw-dot {
-  transform: scale(1.08);
-}
-.swatch.sel .sw-dot {
+.preset.sel .preset-dot {
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
     0 0 0 2px #23242d,
     0 0 0 4px var(--accent);
 }
-.sw-name {
-  font-size: 11px;
-  color: var(--text-faint);
-  line-height: 1;
+.hex-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: rgba(0, 0, 0, 0.22);
 }
-.swatch.sel .sw-name {
-  color: var(--accent);
+.hex-prev {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  flex: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.hex-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+  font-family: Consolas, monospace;
+}
+.hex-apply,
+.cr-apply {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.hex-apply:hover,
+.cr-apply:hover {
+  background: var(--bg-glass-strong);
+  color: var(--text);
+}
+/* 形状自定义比例 */
+.custom-ratio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: rgba(0, 0, 0, 0.22);
+}
+.cr-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+}
+.cr-apply:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 /* 评分星形行 */
 .rate-item .stars {

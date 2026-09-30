@@ -134,6 +134,11 @@ async function commitNote(): Promise<void> {
 
 // 相册
 const albumMenu = reactive({ open: false })
+
+/** 复制主题色 hex */
+function copyColor(css: string): void {
+  void navigator.clipboard.writeText(css).catch(() => {})
+}
 const newAlbumName = ref('')
 const assetAlbums = computed(() => {
   const a = full.value
@@ -267,6 +272,18 @@ const videoRows = computed(() => {
         </span>
       </div>
 
+      <!-- 主题色(Eagle 式色点药丸行) -->
+      <div v-if="full.colors && full.colors.length" class="colors-pill">
+        <span
+          v-for="(c, i) in full.colors"
+          :key="i"
+          class="color-dot"
+          :style="{ background: rgbCss(c) }"
+          :title="`${rgbCss(c)} — 点击复制`"
+          @click="copyColor(rgbCss(c))"
+        />
+      </div>
+
       <!-- 文件名与操作 -->
       <div class="head-area">
         <div v-if="renaming" class="rename-row">
@@ -316,34 +333,24 @@ const videoRows = computed(() => {
         </div>
       </div>
 
-      <!-- 基本信息 -->
-      <div class="sec">
-        <div class="kv"><span class="k">尺寸</span><span class="v">{{ full.width }} × {{ full.height }}</span></div>
-        <div class="kv"><span class="k">大小</span><span class="v">{{ fmtBytes(full.fileSize) }}</span></div>
-        <div v-if="full.kind === 'video' && full.durationMs" class="kv">
-          <span class="k">时长</span><span class="v">{{ fmtDuration(full.durationMs) }}</span>
+      <!-- 基本信息(可折叠) -->
+      <details class="sec fold">
+        <summary>基本信息<Icon name="chevron-down" :size="13" class="fold-chevron" /></summary>
+        <div class="fold-body">
+          <div class="kv"><span class="k">尺寸</span><span class="v">{{ full.width }} × {{ full.height }}</span></div>
+          <div class="kv"><span class="k">大小</span><span class="v">{{ fmtBytes(full.fileSize) }}</span></div>
+          <div v-if="full.kind === 'video' && full.durationMs" class="kv">
+            <span class="k">时长</span><span class="v">{{ fmtDuration(full.durationMs) }}</span>
+          </div>
+          <div class="kv"><span class="k">导入时间</span><span class="v">{{ fmtDate(full.importedAt) }}</span></div>
+          <div class="kv"><span class="k">修改时间</span><span class="v">{{ fmtDate(full.fileModifiedAt) }}</span></div>
+          <div class="kv path-kv"><span class="k">位置</span><span class="v" :title="full.filePath">{{ full.filePath }}</span></div>
         </div>
-        <div class="kv"><span class="k">导入时间</span><span class="v">{{ fmtDate(full.importedAt) }}</span></div>
-        <div class="kv"><span class="k">修改时间</span><span class="v">{{ fmtDate(full.fileModifiedAt) }}</span></div>
-        <div class="kv path-kv"><span class="k">位置</span><span class="v" :title="full.filePath">{{ full.filePath }}</span></div>
-      </div>
-
-      <!-- 主题色?-->
-      <div v-if="full.colors && full.colors.length" class="sec">
-        <div class="sec-title">主题色</div>
-        <div class="color-dots">
-          <span
-            v-for="(c, i) in full.colors"
-            :key="i"
-            class="color-dot"
-            :style="{ background: rgbCss(c) }"
-            :title="rgbCss(c)"
-          />
-        </div>
-      </div>
+      </details>
 
       <!-- 标签 -->
       <div v-if="!ui.isTrash" class="sec">
+        <div class="sec-title">标签</div>
         <TagEditor :asset-id="full.id" />
       </div>
       <div v-else class="sec">
@@ -354,22 +361,19 @@ const videoRows = computed(() => {
         </div>
       </div>
 
-      <!-- 相册 -->
+      <!-- 文件夹 -->
       <div v-if="!ui.isTrash" class="sec">
-        <div class="sec-title-row">
-          <span class="sec-title">相册</span>
-          <button class="mini-btn" @click="albumMenu.open = !albumMenu.open">
-            <Icon name="plus" :size="13" /> 归类
-          </button>
-        </div>
-        <div class="album-chips">
+        <div class="sec-title">文件夹</div>
+        <button class="add-wide" @click="albumMenu.open = !albumMenu.open">
+          <Icon name="plus" :size="14" /> 添加文件夹
+        </button>
+        <div v-if="assetAlbums.length" class="album-chips">
           <span v-for="al in assetAlbums" :key="al.id" class="album-chip">
             {{ al.name }}
             <button class="tag-x" title="移出相册" @click="unassignAlbum(al.id)">
               <Icon name="x" :size="10" />
             </button>
           </span>
-          <span v-if="!assetAlbums.length" class="hint-text">未分类</span>
         </div>
         <div v-if="albumMenu.open" class="album-menu">
           <div class="popover-label">加入 / 更换相册</div>
@@ -388,48 +392,52 @@ const videoRows = computed(() => {
         </div>
       </div>
 
-      <!-- EXIF -->
-      <div v-if="exifRows.length" class="sec">
-        <div class="sec-title">摄影参数</div>
-        <div v-for="row in exifRows" :key="row.k" class="kv">
-          <span class="k">{{ row.k }}</span><span class="v">{{ row.v }}</span>
+      <!-- EXIF(可折叠) -->
+      <details v-if="exifRows.length" class="sec fold">
+        <summary>摄影参数<Icon name="chevron-down" :size="13" class="fold-chevron" /></summary>
+        <div class="fold-body">
+          <div v-for="row in exifRows" :key="row.k" class="kv">
+            <span class="k">{{ row.k }}</span><span class="v">{{ row.v }}</span>
+          </div>
         </div>
-      </div>
+      </details>
 
-      <!-- 视频信息 -->
-      <div v-if="videoRows.length" class="sec">
-        <div class="sec-title">视频信息</div>
-        <div v-for="row in videoRows" :key="row.k" class="kv">
-          <span class="k">{{ row.k }}</span><span class="v">{{ row.v }}</span>
+      <!-- 视频信息(可折叠) -->
+      <details v-if="videoRows.length" class="sec fold">
+        <summary>视频信息<Icon name="chevron-down" :size="13" class="fold-chevron" /></summary>
+        <div class="fold-body">
+          <div v-for="row in videoRows" :key="row.k" class="kv">
+            <span class="k">{{ row.k }}</span><span class="v">{{ row.v }}</span>
+          </div>
         </div>
-      </div>
+      </details>
 
-      <!-- 注释 -->
+      <!-- 注释(Eagle 式输入框) -->
       <div v-if="!ui.isTrash" class="sec">
-        <div class="sec-title-row">
-          <span class="sec-title">注释</span>
-          <button v-if="!noteEditing" class="mini-btn" @click="noteValue = full.note; noteEditing = true">
-            <Icon name="edit" :size="12" />
-          </button>
-        </div>
         <div v-if="noteEditing">
           <textarea v-model="noteValue" rows="3" spellcheck="false" @blur="commitNote" @keydown.esc="noteEditing = false" />
           <button class="btn sm" style="margin-top: 6px" @click="commitNote">保存</button>
         </div>
-        <p v-else class="note-text" :class="{ empty: !full.note }">
-          {{ full.note || '添加注释…' }}
-        </p>
+        <div v-else class="note-box" :class="{ empty: !full.note }" title="点击添加注释" @click="noteValue = full.note; noteEditing = true">
+          {{ full.note || '添加注释' }}
+        </div>
       </div>
 
-      <!-- 直方图(canvas 绘制) -->
-      <div v-if="full.kind === 'image' && !full.missing && !ui.isTrash" class="sec">
-        <HistogramBox :asset-id="full.id" />
-      </div>
+      <!-- 直方图(可折叠,默认展开) -->
+      <details v-if="full.kind === 'image' && !full.missing && !ui.isTrash" class="sec fold" open>
+        <summary>直方图<Icon name="chevron-down" :size="13" class="fold-chevron" /></summary>
+        <div class="fold-body">
+          <HistogramBox :asset-id="full.id" />
+        </div>
+      </details>
 
-      <!-- AI 生成参数 -->
-      <div v-if="full.aiMeta" class="sec">
-        <AiMetaBox :meta="full.aiMeta" />
-      </div>
+      <!-- AI 生成参数(可折叠,默认展开) -->
+      <details v-if="full.aiMeta" class="sec fold" open>
+        <summary>AI 生成参数<Icon name="chevron-down" :size="13" class="fold-chevron" /></summary>
+        <div class="fold-body">
+          <AiMetaBox :meta="full.aiMeta" />
+        </div>
+      </details>
     </template>
 
     <!-- 删除确认 -->
@@ -507,7 +515,7 @@ const videoRows = computed(() => {
 }
 .preview-box img {
   max-width: 100%;
-  max-height: 260px;
+  max-height: 42vh;
   object-fit: contain;
   display: block;
   cursor: zoom-in;
@@ -666,11 +674,96 @@ const videoRows = computed(() => {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Eagle 式色点药丸行 */
+.colors-pill {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin: 0 14px 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+.colors-pill .color-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  flex: none;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  transition: transform 0.12s ease;
+}
+.colors-pill .color-dot:hover {
+  transform: scale(1.18);
+}
 .color-dot {
   width: 22px;
   height: 22px;
   border-radius: 50%;
   border: 2px solid var(--border-strong);
+}
+/* Eagle 式注释输入框 */
+.note-box {
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  user-select: text;
+  min-height: 34px;
+}
+.note-box:hover {
+  border-color: var(--border-strong);
+}
+.note-box.empty {
+  color: var(--text-faint);
+}
+/* 全宽添加按钮(标签/文件夹) */
+.add-wide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.add-wide:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+/* 可折叠区块 */
+details.fold summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+details.fold summary::-webkit-details-marker {
+  display: none;
+}
+.fold-chevron {
+  color: var(--text-faint);
+  transition: transform 0.15s ease;
+}
+details[open] > summary .fold-chevron {
+  transform: rotate(180deg);
+}
+.fold-body {
+  margin-top: 8px;
 }
 .album-chips,
 .tag-list-ro {

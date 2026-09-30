@@ -607,7 +607,7 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
 
     <!-- 右键菜单 -->
     <Teleport to="body">
-      <div v-if="ctx.open" class="popover-backdrop" @mousedown="closeCtx" @contextmenu.prevent />
+      <div v-if="ctx.open" class="popover-backdrop" @mousedown="closeCtx(); ui.selection = []" @contextmenu.prevent />
       <div v-if="ctx.open && ctx.asset" class="popover ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }">
         <div class="popover-item" @click="closeCtx(); cardDblClick(ctx.asset!)">
           <Icon name="eye" :size="14" /> 打开预览
@@ -641,6 +641,13 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
 </template>
 
 <style scoped>
+/* 右键菜单遮罩:必须盖住全窗口,点空白关菜单+取消选中 */
+.popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 299;
+}
+
 .grid-root {
   flex: 1;
   min-height: 0;

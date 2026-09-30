@@ -268,10 +268,21 @@ onBeforeUnmount(() => {
 })
 
 const zoomPct = computed(() => Math.round(view.scale * 100))
+/** 滑杆 0-100 对数映射到 0.1-10 倍 */
+const zoomSlider = computed(() => Math.round((Math.log(view.scale / 0.1) / Math.log(100)) * 100))
+function onSlider(e: Event): void {
+  const v = Number((e.target as HTMLInputElement).value)
+  view.scale = 0.1 * Math.pow(100, v / 100)
+}
 </script>
 
 <template>
-  <div v-if="asset" class="previewer" :class="{ cropping }">
+  <div
+    v-if="asset"
+    class="previewer"
+    :class="{ cropping }"
+    :style="{ top: 'var(--titlebar-h)', right: ui.panelCollapsed ? '0' : 'var(--details-w, 0px)' }"
+  >
     <!-- 舞台 -->
     <div ref="stageEl" class="stage" @mousedown="panDown" @dblclick="fitView">
       <template v-if="asset.kind === 'image'">
@@ -304,30 +315,25 @@ const zoomPct = computed(() => Math.round(view.scale * 100))
       <VideoPlayer v-else :key="asset.id" :asset="asset" />
     </div>
 
-    <!-- 顶部工具栏(Png-Viewer 式单栏:返回 | 信息 | 翻页 | 缩放 | 动作) -->
+    <!-- 顶部工具栏(Eagle 式:返回 | 页码 | 缩放滑杆 | 动作 | 翻页);右侧详情面板保持可见 -->
     <div class="top-bar viewer-toolbar" :class="{ disabled: saving }">
       <button class="pb-btn" title="返回(Esc)" :disabled="saving" @click="close">
         <Icon name="chevron-left" :size="16" />
       </button>
-      <span class="pv-name" :title="asset.fileName">{{ asset.fileName }}</span>
       <span v-if="playlist.length" class="pv-page">{{ index + 1 }} / {{ playlist.length }}</span>
-      <span v-if="asset.kind === 'image'" class="pv-dim">{{ natural.w }} × {{ natural.h }}</span>
       <span class="tb-flex" />
       <template v-if="asset.kind === 'image'">
-        <button class="pb-btn" title="上一张(←)" :disabled="saving" @click="step(-1)">
-          <Icon name="arrow-left" :size="15" />
-        </button>
-        <button class="pb-btn" title="下一张(→)" :disabled="saving" @click="step(1)">
-          <Icon name="arrow-right" :size="15" />
-        </button>
-        <span class="bar-sep" />
-        <button class="pb-btn" title="缩小(-)" @click="stepZoom(1 / 1.2)">
-          <Icon name="minus" :size="15" />
-        </button>
+        <input
+          class="zoom-slider"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          :value="zoomSlider"
+          title="缩放"
+          @input="onSlider"
+        />
         <span class="zoom-pct" title="缩放比例">{{ zoomPct }}%</span>
-        <button class="pb-btn" title="放大(+)" @click="stepZoom(1.2)">
-          <Icon name="plus" :size="15" />
-        </button>
         <button class="pb-btn" title="适应窗口(0)" @click="resetView">
           <Icon name="arrowsOut" :size="15" />
         </button>
@@ -357,8 +363,12 @@ const zoomPct = computed(() => Math.round(view.scale * 100))
       <button class="pb-btn" title="全屏(F)" @click="toggleFullscreen">
         <Icon :name="fullscreen ? 'fullscreen-exit' : 'fullscreen'" :size="15" />
       </button>
-      <button class="pb-btn" title="关闭(Esc)" @click="close">
-        <Icon name="x" :size="16" />
+      <span class="bar-sep" />
+      <button class="pb-btn" title="上一张(←)" :disabled="saving" @click="step(-1)">
+        <Icon name="chevron-left" :size="15" />
+      </button>
+      <button class="pb-btn" title="下一张(→)" :disabled="saving" @click="step(1)">
+        <Icon name="chevron-right" :size="15" />
       </button>
     </div>
 
@@ -373,7 +383,9 @@ const zoomPct = computed(() => Math.round(view.scale * 100))
 <style scoped>
 .previewer {
   position: fixed;
-  inset: 0;
+  /* Eagle 式:只盖住内容区,标题栏与右侧详情面板保持可见(top/right 由内联样式按面板状态绑定) */
+  left: 0;
+  bottom: 0;
   z-index: 700;
   background: var(--viewer-bg, #111113);
   display: flex;
@@ -490,6 +502,27 @@ const zoomPct = computed(() => Math.round(view.scale * 100))
   text-align: center;
   color: var(--vc-text-mid);
   font-variant-numeric: tabular-nums;
+}
+.zoom-slider {
+  width: 150px;
+  height: 3px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 2px;
+  background: var(--vc-fill, rgba(255, 255, 255, 0.2));
+  outline: none;
+  cursor: pointer;
+  margin: 0 10px;
+}
+.zoom-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 .saving-mask {
   position: absolute;

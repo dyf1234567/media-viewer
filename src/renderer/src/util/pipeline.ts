@@ -32,6 +32,28 @@ function inShape(a: Asset, shape: string): boolean {
   return ar >= 0.87 && ar <= 1.15
 }
 
+/** 解析自定义比例:"16:9"、"16/9" 或小数 "1.78";非法返回 null */
+export function parseRatio(input: string): number | null {
+  const t = input.trim()
+  if (!t) return null
+  const m = /^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/.exec(t)
+  if (m) {
+    const a = parseFloat(m[1])
+    const b = parseFloat(m[2])
+    if (a > 0 && b > 0) return a / b
+    return null
+  }
+  const d = parseFloat(t)
+  return d > 0 ? d : null
+}
+
+/** 自定义比例匹配:宽高比相对误差 ≤3% */
+function inCustomRatio(a: Asset, ratio: number): boolean {
+  if (!a.width || !a.height) return false
+  const ar = a.width / a.height
+  return Math.abs(ar - ratio) / ratio <= 0.03
+}
+
 function inDate(ts: number, days: number): boolean {
   if (!ts) return false
   return Date.now() - ts <= days * 24 * 3600 * 1000
@@ -78,6 +100,10 @@ export function applyFilters(assets: Asset[], f: Filters, search: string): Asset
     if (q && !a.fileName.toLowerCase().includes(q)) return false
     if (f.formats.length && !f.formats.includes(a.ext)) return false
     if (f.shape && !inShape(a, f.shape)) return false
+    if (f.shapeCustom) {
+      const r = parseRatio(f.shapeCustom)
+      if (r && !inCustomRatio(a, r)) return false
+    }
     if (f.tags.length && !f.tags.every((t) => a.tagIds.includes(t))) return false
     if (f.albums.length && !f.albums.some((al) => a.albumIds.includes(al))) return false
     if (f.colors.length && (!a.colorFamily || !f.colors.includes(a.colorFamily))) return false
@@ -129,6 +155,7 @@ export function activeFilterChips(
       clear: () => (f.formats = [])
     })
   dim('shape', `形状: ${f.shape === 'h' ? '横图' : f.shape === 'v' ? '竖图' : '方形'}`, f.shape)
+  dim('shapeCustom', `形状: ${f.shapeCustom}`, f.shapeCustom)
   for (const t of f.tags)
     chips.push({
       key: `tag-${t}`,

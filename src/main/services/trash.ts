@@ -18,29 +18,17 @@ async function moveFile(src: string, dest: string): Promise<void> {
   }
 }
 
-/** 移入应用回收站:文件移入图库 trash 目录,记录原位置 */
+/** 移入应用回收站:仅标记删除,原文件原地不动;只有「删除到系统回收站」才会移除文件 */
 export async function moveToTrash(ids: number[]): Promise<BatchResult[]> {
   const results: BatchResult[] = []
   const touched: number[] = []
+  const now = Date.now()
   for (const id of ids) {
     try {
       const row = getAssetRow(id)
       if (!row) throw new Error('素材不存在')
       if (row.deleted_at) throw new Error('已在回收站中')
-      const src = row.file_path
-      const existsOk = await exists(src)
-      let dest = src
-      if (existsOk) {
-        dest = await collisionFreePath(trashDir(), row.file_name)
-        suppressWatch(src)
-        suppressWatch(dest)
-        await moveFile(src, dest)
-      }
-      getDb()
-        .prepare(
-          'UPDATE assets SET file_path = ?, original_path = ?, deleted_at = ? WHERE id = ?'
-        )
-        .run(dest, existsOk ? src : row.file_path, Date.now(), id)
+      getDb().prepare('UPDATE assets SET deleted_at = ? WHERE id = ?').run(now, id)
       touched.push(id)
       results.push({ id, ok: true })
     } catch (e) {
@@ -49,7 +37,7 @@ export async function moveToTrash(ids: number[]): Promise<BatchResult[]> {
   }
   if (touched.length) {
     emitAssets(touched)
-    refreshCoversOf(ids)
+    refreshCoversOf(touched)
   }
   return results
 }
@@ -66,7 +54,7 @@ function refreshCoversOf(ids: number[]): void {
   for (const aid of albumIds) refreshAlbumCover(db, aid)
 }
 
-/** 从回收站恢复:还原到原位置,被占用时自动改名 name (1).ext */
+/** 从回收站恢复:软删除直接清除标记;旧版搬入 trash 目录的文件搬回原位置,被占用时自动改名 */
 export async function restoreFromTrash(ids: number[]): Promise<BatchResult[]> {
   const results: BatchResult[] = []
   const touched: number[] = []
@@ -75,23 +63,35 @@ export async function restoreFromTrash(ids: number[]): Promise<BatchResult[]> {
       const row = getAssetRow(id)
       if (!row) throw new Error('素材不存在')
       if (!row.deleted_at) throw new Error('素材不在回收站中')
-      const target = row.original_path || row.file_path
-      const dir = path.dirname(target)
-      await fsp.mkdir(dir, { recursive: true }).catch(() => {})
-      const finalPath = await collisionFreePath(dir, path.basename(target))
-      if (await exists(row.file_path)) {
-        suppressWatch(row.file_path)
-        suppressWatch(finalPath)
-        await moveFile(row.file_path, finalPath)
+      const legacy = isSubPath(trashDir(), row.file_path)
+      if (legacy) {
+        const target = row.original_path || row.file_path
+        const dir = path.dirname(target)
+        await fsp.mkdir(dir, { recursive: true }).catch(() => {})
+        const finalPath = await collisionFreePath(dir, path.basename(target))
+        if (await exists(row.file_path)) {
+          suppressWatch(row.file_path)
+          suppressWatch(finalPath)
+          await moveFile(row.file_path, finalPath)
+        } else {
+          throw new Error('回收区文件已丢失')
+        }
+        getDb()
+          .prepare(
+            `UPDATE assets SET file_path = ?, file_name = ?, original_path = NULL,
+               deleted_at = NULL, missing = 0 WHERE id = ?`
+          )
+          .run(finalPath, path.basename(finalPath), id)
       } else {
-        throw new Error('回收区文件已丢失')
+        // 软删除:原文件应仍在原位
+        if (!(await exists(row.file_path))) {
+          getDb().prepare('UPDATE assets SET deleted_at = NULL, missing = 1 WHERE id = ?').run(id)
+          touched.push(id)
+          results.push({ id, ok: false, error: '原文件已不存在,已标记为缺失' })
+          continue
+        }
+        getDb().prepare('UPDATE assets SET deleted_at = NULL, missing = 0 WHERE id = ?').run(id)
       }
-      getDb()
-        .prepare(
-          `UPDATE assets SET file_path = ?, file_name = ?, original_path = NULL,
-             deleted_at = NULL, missing = 0 WHERE id = ?`
-        )
-        .run(finalPath, path.basename(finalPath), id)
       touched.push(id)
       results.push({ id, ok: true })
     } catch (e) {
@@ -137,7 +137,7 @@ export async function deleteForever(ids: number[]): Promise<BatchResult[]> {
   return results
 }
 
-/** 回收区到期清理(0 = 不自动清理);送入系统回收站,绝不永久销毁 */
+/** 回收区到期清理(0 = 不自动清理):把原文件送入系统回收站并移除记录 */
 export async function purgeExpired(retentionDays: number): Promise<number> {
   if (!retentionDays || retentionDays <= 0) return 0
   const cutoff = Date.now() - retentionDays * 24 * 3600 * 1000

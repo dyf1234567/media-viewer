@@ -14,6 +14,8 @@ export type ScopeType =
 export interface Filters {
   formats: string[]
   shape: '' | 'h' | 'v' | 'sq'
+  /** 自定义宽高比,如 "16:9" / "1.78";与 shape 互斥 */
+  shapeCustom: string
   tags: number[]
   albums: number[]
   colors: string[]
@@ -91,6 +93,7 @@ export const useUiStore = defineStore('ui', {
     filters: reactive({
       formats: [],
       shape: '',
+      shapeCustom: '',
       tags: [],
       albums: [],
       colors: [],

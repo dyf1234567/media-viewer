@@ -188,4 +188,16 @@ describe('parseComfyUI 多组正负提示词', () => {
     })
     expect(m.prompt).toBe('画一只戴帽子的猫')
   })
+
+  it('非法 JSON(is_changed: [NaN])消毒后可解析(krea 真实样本场景)', () => {
+    const bad = JSON.stringify({
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: '正向文本' } },
+      '2': { class_type: 'CLIPTextEncode', inputs: { text: '负向文本' } },
+      '3': { class_type: 'KSampler', inputs: { seed: 1, steps: 20, cfg: 5, sampler_name: 'euler', positive: ['1', 0], negative: ['2', 0] } },
+      '4': { class_type: 'SaveImage', inputs: { images: ['3', 0] } }
+    }).replace('"4": {"class_type"', '"is_changed": [NaN], "4": {"class_type"')
+    const m = run(JSON.parse(bad))
+    expect(m.prompt).toBe('正向文本')
+    expect(m.negative).toBe('负向文本')
+  })
 })
