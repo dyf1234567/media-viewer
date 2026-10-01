@@ -74,8 +74,8 @@ async function upgradeColorFamily(): Promise<void> {
   }
 }
 
-/** AI 元数据解析策略升级(…v6:重读覆盖回收站;v7:ShowText 运行时文本优先+保存前缀锁定多采样器分支):清空旧解析并重读 */
-const AI_META_POLICY = 7
+/** AI 元数据解析策略升级(…v7:ShowText 运行时文本;v8:LLM 流最终提示词优先级修正——升级重析旧缓存):清空旧解析并重读 */
+const AI_META_POLICY = 8
 async function upgradeAiMeta(): Promise<void> {
   const db = getDb()
   try {

@@ -164,6 +164,7 @@ function onWheel(e: WheelEvent): void {
   const t = e.target as HTMLElement | null
   if (!t || !t.closest('.previewer')) return
   e.preventDefault()
+  cancelMomentum()
   beginLive()
   if (!wheelPending) wheelPending = { x: e.clientX, y: e.clientY, delta: 0 }
   wheelPending.delta += e.deltaY
@@ -182,11 +183,26 @@ function onWheel(e: WheelEvent): void {
 let panning = false
 let panStart = { x: 0, y: 0, tx: 0, ty: 0, lastX: 0, lastY: 0 }
 let panFrame = false
+/** 上一帧位置与时间,用于计算松手速度(轻惯性) */
+let panLastFrame = { x: 0, y: 0, t: 0 }
+let momentumRaf = 0
+let momentumV = { x: 0, y: 0 }
+
+function cancelMomentum(): void {
+  if (momentumRaf) {
+    cancelAnimationFrame(momentumRaf)
+    momentumRaf = 0
+  }
+  momentumV = { x: 0, y: 0 }
+}
+
 function panDown(e: MouseEvent): void {
   if (e.button !== 0 || cropping.value) return
   panning = true
+  cancelMomentum()
   beginLive()
   panStart = { x: e.clientX, y: e.clientY, tx: liveTx, ty: liveTy, lastX: e.clientX, lastY: e.clientY }
+  panLastFrame = { x: liveTx, y: liveTy, t: performance.now() }
   window.addEventListener('mousemove', panMove)
   window.addEventListener('mouseup', panUp)
 }
@@ -201,6 +217,11 @@ function panMove(e: MouseEvent): void {
     if (!panning) return
     liveTx = panStart.tx + (panStart.lastX - panStart.x)
     liveTy = panStart.ty + (panStart.lastY - panStart.y)
+    const now = performance.now()
+    const dt = Math.max(1, now - panLastFrame.t)
+    momentumV.x = ((liveTx - panLastFrame.x) / dt) * 16
+    momentumV.y = ((liveTy - panLastFrame.y) / dt) * 16
+    panLastFrame = { x: liveTx, y: liveTy, t: now }
     writeLiveTransform()
     scheduleLiveSync()
   })
@@ -211,6 +232,21 @@ function panUp(): void {
   window.removeEventListener('mouseup', panUp)
   liveTx = panStart.tx + (panStart.lastX - panStart.x)
   liveTy = panStart.ty + (panStart.lastY - panStart.y)
+  // 轻惯性:快速甩动后继续滑行并指数衰减,慢速松手几乎无感
+  if (Math.hypot(momentumV.x, momentumV.y) > 3) {
+    const glide = (): void => {
+      momentumV.x *= 0.9
+      momentumV.y *= 0.9
+      liveTx += momentumV.x
+      liveTy += momentumV.y
+      writeLiveTransform()
+      scheduleLiveSync()
+      if (Math.hypot(momentumV.x, momentumV.y) > 0.4) momentumRaf = requestAnimationFrame(glide)
+      else momentumRaf = 0
+    }
+    momentumRaf = requestAnimationFrame(glide)
+    return
+  }
   scheduleLiveSync()
 }
 
@@ -367,16 +403,23 @@ function toggleFullscreen(): void {
   else void document.exitFullscreen()
 }
 
+/** 退出过渡:先淡出再真正关闭 */
+const leaving = ref(false)
 function close(): void {
   slideshow.value = false
   if (slideTimer) {
     clearInterval(slideTimer)
     slideTimer = null
   }
-  // 先退出预览,暂存变换后台写盘(退出零等待)
+  cancelMomentum()
   const cur = asset.value
-  ui.closePreview()
-  if (cur && hasPending.value) void flushPending(cur.id)
+  const pending = cur ? hasPending.value : false
+  leaving.value = true
+  window.setTimeout(() => {
+    ui.closePreview()
+    leaving.value = false
+    if (cur && pending) void flushPending(cur.id)
+  }, 130)
 }
 
 // ---------- 键盘 ----------
@@ -466,7 +509,7 @@ function applyViewStyle(): void {
   <div
     v-if="asset"
     class="previewer"
-    :class="{ cropping }"
+    :class="{ cropping, leaving }"
     :style="{
       top: 'var(--titlebar-h)',
       right: ui.panelCollapsed ? '0' : 'var(--details-w, 0px)',
@@ -587,7 +630,20 @@ function applyViewStyle(): void {
   z-index: 700;
   background: var(--viewer-bg, #111113);
   display: flex;
-  transition: left 0.2s ease, right 0.2s ease;
+  transition: left 0.2s ease, right 0.2s ease, opacity 0.13s ease;
+  animation: pv-in 0.15s ease;
+}
+.previewer.leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+@keyframes pv-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .stage {
   flex: 1;

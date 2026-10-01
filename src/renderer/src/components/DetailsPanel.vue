@@ -462,7 +462,8 @@ const videoRows = computed(() => {
   width: var(--details-w);
   flex: none;
   border-left: 1px solid var(--border);
-  background: rgba(20, 21, 27, 0.92);
+  /* 半透明玻璃:透出背景渐变与光斑(Png-Viewer 式) */
+  background: rgba(14, 16, 24, 0.55);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -511,9 +512,9 @@ const videoRows = computed(() => {
   border-radius: var(--radius);
   overflow: hidden;
   background: rgba(0, 0, 0, 0.32);
-  /* 固定高度:预览区不随图片比例变化,下方内容不跳动;30vh 不喧宾夺主 */
-  height: 30vh;
-  min-height: 140px;
+  /* 固定高度:预览区不随图片比例变化,下方内容不跳动;24vh 轻巧不喧宾夺主 */
+  height: 24vh;
+  min-height: 130px;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1,0 +1,12 @@
+// show-sort2.cjs
+const fs = require('fs')
+const t = fs.readFileSync('src/renderer/src/components/Toolbar.vue', 'utf8')
+const i = t.indexOf('const SORTS')
+console.log('=== SORTS ===')
+console.log(t.slice(i, i + 600))
+const g = fs.readFileSync('src/renderer/src/components/AssetGrid.vue', 'utf8')
+const j = g.indexOf('.thumb-cell {')
+console.log('=== .thumb-cell 规则 ===')
+console.log(g.slice(j, j + 300))
+const m = g.indexOf('const ROW_H')
+console.log('ROW_H:', g.slice(m, m + 25))

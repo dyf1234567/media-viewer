@@ -131,7 +131,8 @@ function albumThumb(cover: string | null): string | null {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
-  background: rgba(20, 21, 27, 0.88);
+  /* 半透明玻璃:透出背景渐变与光斑 */
+  background: rgba(14, 16, 24, 0.5);
   overflow: hidden;
   transition: width 0.2s ease;
   flex: none;

@@ -86,8 +86,8 @@ const layout = computed<{ positions: CardPos[]; totalH: number; cols: number; co
   return { positions, totalH, cols, colW }
 })
 
-/** 列表行高 */
-const ROW_H = 52
+/** 列表行高(缩略图 44 高 + 上下留白) */
+const ROW_H = 58
 const listTotalH = computed(() => items.value.length * ROW_H + 8)
 
 /** 可视窗口裁剪(块跳跃 + 逐项检测配合 overscan) */
@@ -887,7 +887,8 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
   position: absolute;
   left: 14px;
   right: 14px;
-  height: 44px;
+  /* 与 JS ROW_H 同步:行高不一致会导致行重叠/缩略图被裁 */
+  height: 58px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -913,8 +914,8 @@ const emptyKind = computed<'' | 'no-assets' | 'no-results' | 'trash-empty'>(() =
 }
 .thumb-cell {
   flex: none;
-  width: 44px;
-  height: 40px;
+  width: 58px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;

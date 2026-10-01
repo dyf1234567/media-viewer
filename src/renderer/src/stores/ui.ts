@@ -27,7 +27,17 @@ export interface Filters {
   size: '' | '>10mb' | '>1mb' | '>100kb' | '<100kb' | '<1mb'
 }
 
-export type SortKey = 'imported' | 'name-asc' | 'name-desc' | 'size-desc' | 'rating-desc' | 'modified'
+export type SortKey =
+  | 'imported'
+  | 'imported-asc'
+  | 'name-asc'
+  | 'name-desc'
+  | 'size-desc'
+  | 'size-asc'
+  | 'rating-desc'
+  | 'rating-asc'
+  | 'modified'
+  | 'modified-asc'
 export type ViewMode = 'waterfall' | 'list'
 
 interface PreviewState {

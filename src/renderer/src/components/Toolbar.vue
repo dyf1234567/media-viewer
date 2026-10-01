@@ -16,12 +16,16 @@ const plusMenuX = ref(0)
 const plusMenuY = ref(0)
 
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: 'imported', label: '导入顺序' },
-  { key: 'name-asc', label: '名称升序' },
-  { key: 'name-desc', label: '名称降序' },
-  { key: 'size-desc', label: '文件从大到小' },
-  { key: 'rating-desc', label: '评分从高到低' },
-  { key: 'modified', label: '最近修改' }
+  { key: 'imported', label: '导入:最新在前' },
+  { key: 'imported-asc', label: '导入:最早在前' },
+  { key: 'name-asc', label: '名称:升序 A→Z' },
+  { key: 'name-desc', label: '名称:降序 Z→A' },
+  { key: 'size-desc', label: '大小:从大到小' },
+  { key: 'size-asc', label: '大小:从小到大' },
+  { key: 'rating-desc', label: '评分:从高到低' },
+  { key: 'rating-asc', label: '评分:从低到高' },
+  { key: 'modified', label: '修改:最近在前' },
+  { key: 'modified-asc', label: '修改:最早在前' }
 ]
 
 function openPlusMenu(e: MouseEvent): void {

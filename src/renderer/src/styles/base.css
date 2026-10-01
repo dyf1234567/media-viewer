@@ -7,9 +7,10 @@
   --panel-2: #1b1c23;
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --text: #e9e9ee;
-  --text-dim: #a2a3ad;
-  --text-faint: #6b6c76;
+  /* 文字层级整体提亮(Png-Viewer 式清亮观感) */
+  --text: #f0f2f8;
+  --text-dim: #b9bdc9;
+  --text-faint: #82868f;
   --accent: #4f7cff;
   --accent-soft: rgba(79, 124, 255, 0.16);
   --danger: #ff5d5d;
@@ -27,11 +28,11 @@
   --ui-bg-image: none;
 }
 
-/* 界面背景预设(渐变玻璃 / 深色系) */
+/* 界面背景预设(渐变玻璃 / 深色系);aurora 拉开蓝紫层次,更接近 Png-Viewer 的背景观感 */
 body[data-ui-bg='aurora'] {
-  --ui-bg-image: radial-gradient(1200px 700px at 18% -8%, rgba(89, 62, 180, 0.28), transparent 60%),
-    radial-gradient(1000px 600px at 95% 8%, rgba(31, 104, 158, 0.24), transparent 55%),
-    radial-gradient(900px 700px at 50% 110%, rgba(21, 101, 94, 0.18), transparent 60%);
+  --ui-bg-image: radial-gradient(1200px 700px at 18% -8%, rgba(96, 68, 200, 0.34), transparent 60%),
+    radial-gradient(1000px 600px at 95% 8%, rgba(38, 116, 190, 0.3), transparent 55%),
+    radial-gradient(900px 700px at 50% 112%, rgba(24, 108, 120, 0.2), transparent 60%);
 }
 body[data-ui-bg='midnight'] {
   --ui-bg-image: radial-gradient(1100px 800px at 30% -10%, rgba(40, 52, 110, 0.35), transparent 65%),
@@ -206,7 +207,7 @@ body,
 }
 body {
   font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--text);
   background-color: var(--bg);
   background-image: var(--ui-bg-image);

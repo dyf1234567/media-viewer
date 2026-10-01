@@ -128,10 +128,18 @@ export function applySort(assets: Asset[], key: SortKey, random: boolean): Asset
       return arr.sort((a, b) => b.fileName.localeCompare(a.fileName, 'zh-CN'))
     case 'size-desc':
       return arr.sort((a, b) => b.fileSize - a.fileSize)
+    case 'size-asc':
+      return arr.sort((a, b) => a.fileSize - b.fileSize)
     case 'rating-desc':
       return arr.sort((a, b) => b.rating - a.rating || b.id - a.id)
+    case 'rating-asc':
+      return arr.sort((a, b) => a.rating - b.rating || a.id - b.id)
     case 'modified':
       return arr.sort((a, b) => b.fileModifiedAt - a.fileModifiedAt)
+    case 'modified-asc':
+      return arr.sort((a, b) => a.fileModifiedAt - b.fileModifiedAt)
+    case 'imported-asc':
+      return arr.sort((a, b) => a.id - b.id)
     default:
       // 导入顺序:最新导入在前
       return arr.sort((a, b) => b.id - a.id)
