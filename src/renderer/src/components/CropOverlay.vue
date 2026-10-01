@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 
 const props = defineProps<{
@@ -29,7 +29,23 @@ const imgRect = computed(() => {
 const sel = reactive({ x: 0, y: 0, w: 0, h: 0 })
 const started = ref(false)
 
-type Handle = 'nw' | 'ne' | 'sw' | 'se' | null
+/** 默认全选:选区初始即整张图,直接拖动边/角往里收 */
+function selectAll(): void {
+  const r = imgRect.value
+  if (!r.w || !r.h) return
+  sel.x = r.x
+  sel.y = r.y
+  sel.w = r.w
+  sel.h = r.h
+  started.value = true
+}
+onMounted(selectAll)
+watch(imgRect, (r) => {
+  // 首次拿到有效舞台尺寸时完成初始全选
+  if (!started.value && r.w && r.h) selectAll()
+})
+
+type Handle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'w' | 'e' | null
 let dragMode: 'move' | 'resize' | 'create' | null = null
 let activeHandle: Handle = null
 let startPt = { x: 0, y: 0 }
@@ -78,7 +94,11 @@ function hitHandle(px: number, py: number): Handle {
     ['nw', sel.x, sel.y],
     ['ne', sel.x + sel.w, sel.y],
     ['sw', sel.x, sel.y + sel.h],
-    ['se', sel.x + sel.w, sel.y + sel.h]
+    ['se', sel.x + sel.w, sel.y + sel.h],
+    ['n', sel.x + sel.w / 2, sel.y],
+    ['s', sel.x + sel.w / 2, sel.y + sel.h],
+    ['w', sel.x, sel.y + sel.h / 2],
+    ['e', sel.x + sel.w, sel.y + sel.h / 2]
   ]
   for (const [h, hx, hy] of pts) {
     if (Math.abs(px - hx) < R && Math.abs(py - hy) < R) return h
@@ -112,10 +132,16 @@ function move(e: MouseEvent): void {
     if (activeHandle.includes('s')) y2 = p.y
     if (activeHandle.includes('w')) x1 = p.x
     if (activeHandle.includes('e')) x2 = p.x
+    // 保持选区在图像范围内,且不小于 4px
+    const r = imgRect.value
+    x1 = Math.max(r.x, Math.min(x1, r.x + r.w))
+    x2 = Math.max(r.x, Math.min(x2, r.x + r.w))
+    y1 = Math.max(r.y, Math.min(y1, r.y + r.h))
+    y2 = Math.max(r.y, Math.min(y2, r.y + r.h))
     sel.x = Math.min(x1, x2)
     sel.y = Math.min(y1, y2)
-    sel.w = Math.abs(x2 - x1)
-    sel.h = Math.abs(y2 - y1)
+    sel.w = Math.max(4, Math.abs(x2 - x1))
+    sel.h = Math.max(4, Math.abs(y2 - y1))
   }
 }
 
@@ -168,7 +194,7 @@ function confirm(): void {
       }"
     >
       <span
-        v-for="h in ['nw', 'ne', 'sw', 'se'] as const"
+        v-for="h in ['nw', 'ne', 'sw', 'se', 'n', 's', 'w', 'e'] as const"
         :key="h"
         class="handle"
         :class="h"
@@ -187,6 +213,7 @@ function confirm(): void {
       </button>
     </div>
     <div v-if="!started" class="crop-hint">在画面上拖拽出裁切区域</div>
+    <div v-else-if="sel.w === imgRect.w && sel.h === imgRect.h" class="crop-hint">已全选,拖动边或四角往里收</div>
   </div>
 </template>
 
@@ -235,6 +262,38 @@ function confirm(): void {
   right: -5px;
   bottom: -5px;
   cursor: nwse-resize;
+}
+.handle.n {
+  left: 50%;
+  top: -4px;
+  margin-left: -10px;
+  width: 20px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.handle.s {
+  left: 50%;
+  bottom: -4px;
+  margin-left: -10px;
+  width: 20px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.handle.w {
+  left: -4px;
+  top: 50%;
+  margin-top: -10px;
+  width: 7px;
+  height: 20px;
+  cursor: ew-resize;
+}
+.handle.e {
+  right: -4px;
+  top: 50%;
+  margin-top: -10px;
+  width: 7px;
+  height: 20px;
+  cursor: ew-resize;
 }
 .crop-toolbar {
   position: absolute;

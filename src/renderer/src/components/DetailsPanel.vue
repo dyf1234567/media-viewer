@@ -467,6 +467,10 @@ const videoRows = computed(() => {
   display: flex;
   flex-direction: column;
 }
+/* 面板内容超出时整体滚动,而不是把每个区块压扁(压缩会导致预览图溢出被裁) */
+.details > * {
+  flex-shrink: 0;
+}
 .no-selection {
   padding: 40px 24px;
   display: flex;
@@ -513,10 +517,14 @@ const videoRows = computed(() => {
   justify-content: center;
 }
 .preview-box img {
+  /* 宽高全自适应 + 双上限:任何比例都完整可见,不裁切不拉伸 */
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: 42vh;
   object-fit: contain;
   display: block;
+  margin: 0 auto;
   cursor: zoom-in;
 }
 .missing-box {

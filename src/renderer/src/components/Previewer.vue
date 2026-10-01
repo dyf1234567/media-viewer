@@ -40,8 +40,12 @@ const natural = computed(() => ({ w: asset.value?.width ?? 0, h: asset.value?.he
 function fitScaleOf(): number {
   const el = stageEl.value
   if (!el || !natural.value.w) return 1
+  // 旋转 90/270 后宽高互换
+  const rot = totalRot.value % 180 !== 0
+  const w = rot ? natural.value.h : natural.value.w
+  const h = rot ? natural.value.w : natural.value.h
   // 自适应窗口:小图也放大到铺满可视区(默认打开即适配,不设 100% 上限)
-  return Math.max(0.1, Math.min(el.clientWidth / natural.value.w, el.clientHeight / natural.value.h))
+  return Math.max(0.1, Math.min(el.clientWidth / w, el.clientHeight / h))
 }
 
 function resetView(): void {
@@ -125,7 +129,8 @@ function panMove(e: MouseEvent): void {
     view.tx = panStart.tx + (panStart.lastX - panStart.x)
     view.ty = panStart.ty + (panStart.lastY - panStart.y)
     const el = imgEl.value
-    if (el) el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / (baseScale.value || 1)})`
+    const extra = pendingCss.value ? ' ' + pendingCss.value : ''
+    if (el) el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / (baseScale.value || 1)})${extra}`
   })
 }
 function panUp(): void {
@@ -137,10 +142,14 @@ function panUp(): void {
 
 const transformStyle = computed(() => {
   const base = baseScale.value > 0 ? baseScale.value : 1
+  const rot = totalRot.value % 180 !== 0
+  const w = (rot ? natural.value.h : natural.value.w) * base
+  const h = (rot ? natural.value.w : natural.value.h) * base
+  const extra = pendingCss.value ? ' ' + pendingCss.value : ''
   return {
-    width: Math.round(natural.value.w * base) + 'px',
-    height: Math.round(natural.value.h * base) + 'px',
-    transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})`
+    width: Math.round(w) + 'px',
+    height: Math.round(h) + 'px',
+    transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})${extra}`
   }
 })
 
@@ -161,8 +170,9 @@ watch(
 )
 
 // ---------- 切换 ----------
-function step(delta: number): void {
-  if (saving.value) return
+async function step(delta: number): Promise<void> {
+  if (saving.value || flushing) return
+  await flushPending() // 切图前把当前图的变换写盘
   const list = playlist.value
   if (!list.length) return
   const next = (index.value + delta + list.length) % list.length
@@ -192,27 +202,66 @@ function toggleSlideshow(): void {
   }
 }
 
-// ---------- 变换写盘 ----------
-async function applyTransform(args: { rotate?: number; flipH?: boolean }): Promise<void> {
-  if (!asset.value || saving.value) return
-  if (asset.value.missing) {
-    toast.error('文件缺失,无法保存')
-    return
+// ---------- 变换暂存(翻转/旋转不立即写盘,切换图片或退出预览时统一保存) ----------
+interface PendingOp {
+  rotate?: number
+  flipH?: boolean
+}
+const pendingOps = ref<PendingOp[]>([])
+const hasPending = computed(() => pendingOps.value.length > 0)
+let flushing = false
+
+/** 累计旋转角(90/270 时显示宽高互换) */
+const totalRot = computed(() => pendingOps.value.reduce((s, o) => s + (o.rotate ?? 0), 0) % 360)
+/** 变换后的 CSS 片段:后到的操作在字符串左侧(先作用于内容坐标),与逐个写盘的顺序一致 */
+const pendingCss = computed(() => {
+  let m = ''
+  for (const op of [...pendingOps.value].reverse()) {
+    if (op.flipH) m += ' scaleX(-1)'
+    if (op.rotate) m += ` rotate(${op.rotate}deg)`
   }
-  saving.value = true
-  try {
-    await window.mv.editor.apply({ id: asset.value.id, ...args })
-    // 记录已由事件同步刷新;重新加载图片
-    imgLoaded.value = false
-  } catch (e) {
-    toast.error((e as Error).message)
-  } finally {
-    saving.value = false
+  return m.trim()
+})
+
+function queueTransform(op: PendingOp): void {
+  if (!asset.value || asset.value.missing || cropping.value || flushing) return
+  pendingOps.value.push(op)
+  // 视觉立即生效并重新适配(旋转后宽高互换)
+  nextTick(() => fitView())
+}
+
+/** 把暂存的变换按序写盘(切换图片/退出预览/进入裁切前调用) */
+async function flushPending(): Promise<void> {
+  if (flushing || !pendingOps.value.length || !asset.value) return
+  flushing = true
+  const id = asset.value.id
+  const ops = pendingOps.value.splice(0)
+  for (let i = 0; i < ops.length; i++) {
+    try {
+      await window.mv.editor.apply({ id, ...ops[i] })
+    } catch (e) {
+      toast.error(`保存失败: ${(e as Error).message}`)
+      pendingOps.value.unshift(...ops.slice(i))
+      break
+    }
   }
+  flushing = false
 }
 
 // ---------- 裁切 ----------
 const cropping = ref(false)
+/** 进入裁切前先写盘暂存变换,保证裁切坐标对应磁盘上的真实图像 */
+async function startCrop(): Promise<void> {
+  if (!asset.value || asset.value.missing) return
+  await flushPending()
+  cropping.value = true
+}
+/** 打开编辑器前同样先写盘,编辑器直接操作磁盘文件 */
+async function openEditorFlushed(): Promise<void> {
+  if (!asset.value || flushing) return
+  await flushPending()
+  ui.openEditor(asset.value.id)
+}
 function cropDone(rect: { x: number; y: number; w: number; h: number } | null): void {
   cropping.value = false
   if (!rect || !asset.value) return
@@ -237,12 +286,13 @@ function toggleFullscreen(): void {
   else void document.exitFullscreen()
 }
 
-function close(): void {
+async function close(): Promise<void> {
   slideshow.value = false
   if (slideTimer) {
     clearInterval(slideTimer)
     slideTimer = null
   }
+  await flushPending() // 退出前保存未写盘的变换
   ui.closePreview()
 }
 
@@ -280,7 +330,7 @@ function onKeydown(e: KeyboardEvent): void {
       break
     case 'r':
     case 'R':
-      if (asset.value?.kind === 'image') void applyTransform({ rotate: 90 })
+      if (asset.value?.kind === 'image') queueTransform({ rotate: 90 })
       break
     case 'f':
     case 'F':
@@ -322,7 +372,8 @@ function applyViewStyle(): void {
   const el = imgEl.value
   if (!el) return
   const base = baseScale.value > 0 ? baseScale.value : 1
-  el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})`
+  const extra = pendingCss.value ? ' ' + pendingCss.value : ''
+  el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})${extra}`
 }
 </script>
 
@@ -349,6 +400,7 @@ function applyViewStyle(): void {
           class="view-img"
           :style="transformStyle"
           draggable="false"
+          decoding="async"
           alt=""
           @load="onImgLoad"
         />
@@ -395,17 +447,20 @@ function applyViewStyle(): void {
         <button class="pb-btn" title="适应窗口(0)" @click="resetView">
           <Icon name="arrowsOut" :size="15" />
         </button>
+        <span v-if="hasPending" class="pend-chip" title="翻转/旋转尚未写盘,切换图片或退出预览时自动保存">
+          <span class="pend-dot" />未保存
+        </span>
         <span class="bar-sep" />
-        <button class="pb-btn" title="水平翻转并保存" :disabled="saving" @click="applyTransform({ flipH: true })">
+        <button class="pb-btn" title="水平翻转(切换或退出时保存)" @click="queueTransform({ flipH: true })">
           <Icon name="flip" :size="15" />
         </button>
-        <button class="pb-btn" title="旋转 90° 并保存?R)" :disabled="saving" @click="applyTransform({ rotate: 90 })">
+        <button class="pb-btn" title="旋转 90°(R,切换或退出时保存)" @click="queueTransform({ rotate: 90 })">
           <Icon name="rotate-r" :size="15" />
         </button>
-        <button class="pb-btn" title="裁切" :disabled="saving" @click="cropping = true">
+        <button class="pb-btn" title="裁切" :disabled="saving || flushing" @click="startCrop">
           <Icon name="crop" :size="15" />
         </button>
-        <button class="pb-btn" title="编辑图片" :disabled="saving" @click="ui.openEditor(asset.id)">
+        <button class="pb-btn" title="编辑图片" :disabled="flushing" @click="openEditorFlushed">
           <Icon name="edit" :size="15" />
         </button>
       </template>
@@ -585,6 +640,24 @@ function applyViewStyle(): void {
   background: #fff;
   border: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+/* 未保存变换指示 */
+.pend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 180, 77, 0.16);
+  color: var(--warn, #ffb44d);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.pend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .saving-mask {
   position: absolute;
