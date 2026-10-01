@@ -1,4 +1,4 @@
-?<script setup lang="ts">
+<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import Icon from './Icon.vue'
 

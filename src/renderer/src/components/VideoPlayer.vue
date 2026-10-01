@@ -1,4 +1,4 @@
-?<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Asset, PlayInfo } from '@sh/types'
 import { useToastStore } from '../stores/toast'

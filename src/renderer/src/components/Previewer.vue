@@ -1,4 +1,4 @@
-?<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useUiStore } from '../stores/ui'
 import { useLibraryStore } from '../stores/library'
@@ -121,14 +121,18 @@ function panMove(e: MouseEvent): void {
   requestAnimationFrame(() => {
     panFrame = false
     if (!panning) return
+    // 只写合成层样式,不碰响应式状态;松手时一次性同步
     view.tx = panStart.tx + (panStart.lastX - panStart.x)
     view.ty = panStart.ty + (panStart.lastY - panStart.y)
+    const el = imgEl.value
+    if (el) el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / (baseScale.value || 1)})`
   })
 }
 function panUp(): void {
   panning = false
   window.removeEventListener('mousemove', panMove)
   window.removeEventListener('mouseup', panUp)
+  applyViewStyle()
 }
 
 const transformStyle = computed(() => {
@@ -309,6 +313,16 @@ const zoomSlider = computed(() => Math.round((Math.log(view.scale / 0.1) / Math.
 function onSlider(e: Event): void {
   const v = Number((e.target as HTMLInputElement).value)
   view.scale = 0.1 * Math.pow(100, v / 100)
+  nextTick(applyViewStyle)
+}
+
+/** 直接写合成层变换(绕开 Vue 渲染管线,拖动零延迟);松手/缩放后再同步 view 状态 */
+const imgEl = ref<HTMLImageElement | null>(null)
+function applyViewStyle(): void {
+  const el = imgEl.value
+  if (!el) return
+  const base = baseScale.value > 0 ? baseScale.value : 1
+  el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})`
 }
 </script>
 
@@ -329,6 +343,7 @@ function onSlider(e: Event): void {
         <!-- 缩略图立即显示,原图解码完成后无缝替换(Eagle 式打开即见);尺寸用库内真实宽高,不必等解码 -->
         <img
           v-show="imgLoaded && !asset.missing"
+          ref="imgEl"
           :key="asset.id + '-' + asset.fileModifiedAt"
           :src="imgLoaded ? sourceUrl(asset) : thumbUrl(asset)"
           class="view-img"

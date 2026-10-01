@@ -1,4 +1,4 @@
-?<script setup lang="ts">
+<script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import type { AssetFull } from '@sh/types'
 import { useUiStore } from '../stores/ui'
