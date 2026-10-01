@@ -194,6 +194,7 @@ function safeJsonParse<T>(text: string): T | null {
 export function parseComfyUI(promptText: string, workflowText: string | null, fileNameBase?: string): AiMeta {
   let prompt: string | null = null
   let negative: string | null = null
+  let meta_candidates: string[] | undefined
   const params: Record<string, string> = {}
   const models: string[] = []
 
@@ -254,6 +255,17 @@ export function parseComfyUI(promptText: string, workflowText: string | null, fi
       const t = posTextOf(node)
       if (t && !out.includes(t)) out.push(t)
       return
+    }
+    // ifElse/switch 节点:按缓存的 boolean 选择分支,不两个都收(easy ifElse 的 boolean 是运行时真值)
+    if (/ifelse|switch/i.test(node.class_type)) {
+      const b = inp['boolean']
+      const branch = b === true || (typeof b === 'string' && b.toLowerCase() === 'true') ? 'on_true' : b === false || (typeof b === 'string' && b.toLowerCase() === 'false') ? 'on_false' : null
+      if (branch) {
+        const v = inp[branch]
+        if (Array.isArray(v)) followStringRefs(graph, String(v[0]), depth + 1, seen, out, showTextOnly)
+        else if (typeof v === 'string' && v.trim() && !out.includes(v)) out.push(v)
+        return
+      }
     }
     if (showTextOnly) {
       for (const v of Object.values(inp)) {
@@ -457,6 +469,20 @@ export function parseComfyUI(promptText: string, workflowText: string | null, fi
       if (posTexts.length) prompt = posTexts.join('\n')
       if (negTexts.length) negative = negTexts.join('\n')
 
+      // 候选提示词:复用工作流的 ShowText 缓存可能串图(最后一次运行的值),
+      // 把全图所有 ShowText 缓存收集为候选,面板可切换比对画面选正确的
+      if (prompt) {
+        const cands: string[] = []
+        for (const node of Object.values(graph)) {
+          if (!/showtext/i.test(node.class_type)) continue
+          const t = node.inputs?.['text_0']
+          if (typeof t === 'string' && t.trim().length >= 12 && t.trim() !== prompt && !cands.includes(t.trim())) {
+            cands.push(t.trim())
+          }
+        }
+        if (cands.length) meta_candidates = cands
+      }
+
       if (targetSamplers.length) readSamplerParams(graph, targetSamplers[0])
 
       // 回溯失败时退回旧启发:任何带 positive/negative 的节点回溯单文本
@@ -543,6 +569,7 @@ export function parseComfyUI(promptText: string, workflowText: string | null, fi
     params,
     models,
     workflow: workflowPretty,
-    raw: [promptText, workflowText].filter(Boolean).join('\n\n') || null
+    raw: [promptText, workflowText].filter(Boolean).join('\n\n') || null,
+    promptCandidates: meta_candidates
   }
 }

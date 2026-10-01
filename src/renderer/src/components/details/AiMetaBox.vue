@@ -7,6 +7,11 @@ const props = defineProps<{ meta: AiMeta }>()
 
 const collapsed = ref(true)
 
+/** 多候选提示词:复用工作流的 ShowText 缓存可能串图,可切换比对画面 */
+const candIdx = ref(0)
+const candidates = computed(() => props.meta.promptCandidates ?? [])
+const shownPrompt = computed(() => (candIdx.value > 0 ? candidates.value[candIdx.value - 1] : props.meta.prompt))
+
 const sourceLabel = computed(
   () =>
     ({
@@ -36,16 +41,29 @@ async function copy(text: string | null): Promise<void> {
       <span class="src-chip">{{ sourceLabel }}</span>
     </div>
 
-    <!-- 提示词 -->
-    <div v-if="meta.prompt" class="prompt-card">
+    <!-- 提示词(多候选可切换) -->
+    <div v-if="shownPrompt" class="prompt-card">
       <div class="pc-head">
         <span>提示词</span>
-        <button class="mini-btn" title="复制" @click="copy(meta.prompt)">
+        <button class="mini-btn" title="复制" @click="copy(shownPrompt)">
           <Icon name="copy" :size="12" />
         </button>
       </div>
-      <p class="prompt-text" :class="{ clamp: collapsed }">{{ meta.prompt }}</p>
-      <button v-if="meta.prompt.length > 160 || meta.prompt.split('\n').length > 3" class="expand-btn" @click="collapsed = !collapsed">
+      <div v-if="candidates.length" class="cand-row">
+        <button class="cand-tab" :class="{ on: candIdx === 0 }" @click="candIdx = 0">主</button>
+        <button
+          v-for="(c, i) in candidates"
+          :key="i"
+          class="cand-tab"
+          :class="{ on: candIdx === i + 1 }"
+          :title="c.slice(0, 80)"
+          @click="candIdx = i + 1"
+        >
+          候选{{ i + 1 }}
+        </button>
+      </div>
+      <p class="prompt-text" :class="{ clamp: collapsed }">{{ shownPrompt }}</p>
+      <button v-if="shownPrompt.length > 160 || shownPrompt.split('\n').length > 3" class="expand-btn" @click="collapsed = !collapsed">
         {{ collapsed ? '展开' : '收起' }}
       </button>
     </div>
@@ -140,6 +158,30 @@ async function copy(text: string | null): Promise<void> {
   font-size: 11px;
   color: var(--text-faint);
   margin-bottom: 5px;
+}
+/* 候选切换标签 */
+.cand-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.cand-tab {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.cand-tab:hover {
+  color: var(--text);
+}
+.cand-tab.on {
+  background: var(--accent-soft);
+  border-color: rgba(79, 124, 255, 0.4);
+  color: var(--accent);
 }
 .prompt-text {
   font-size: 11.5px;

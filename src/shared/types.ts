@@ -60,6 +60,8 @@ export interface AiMeta {
   models: string[]
   workflow: string | null
   raw: string | null
+  /** 复用工作流的多候选提示词(ShowText 缓存),运行时分支优先;面板可切换查看 */
+  promptCandidates?: string[]
 }
 
 export interface VideoInfo {
