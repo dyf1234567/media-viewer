@@ -67,6 +67,71 @@ function clampScale(s: number): number {
   return Math.max(0.1, Math.min(10, s))
 }
 
+/**
+ * 活动视图:拖动/滚轮等连续操作期间完全绕开响应式(不触发组件重渲染),
+ * 直接写合成层样式与百分比显示;操作结束 150ms 后一次性同步回 view。
+ */
+let liveTx = 0
+let liveTy = 0
+let liveScale = 1
+let liveActive = false
+let liveStageRect: DOMRect | null = null
+let liveSyncTimer: number | null = null
+const pctEl = ref<HTMLElement | null>(null)
+const sliderEl = ref<HTMLInputElement | null>(null)
+
+function beginLive(): void {
+  if (!liveActive) {
+    liveActive = true
+    liveTx = view.tx
+    liveTy = view.ty
+    liveScale = view.scale
+    const el = stageEl.value
+    liveStageRect = el ? el.getBoundingClientRect() : null
+  }
+  if (liveSyncTimer) {
+    clearTimeout(liveSyncTimer)
+    liveSyncTimer = null
+  }
+}
+/** 操作静默 150ms 后把 live 状态写回响应式(值与直写一致,无视觉跳变) */
+function scheduleLiveSync(): void {
+  if (liveSyncTimer) clearTimeout(liveSyncTimer)
+  liveSyncTimer = window.setTimeout(() => {
+    liveSyncTimer = null
+    if (!liveActive) return
+    liveActive = false
+    liveStageRect = null
+    view.tx = liveTx
+    view.ty = liveTy
+    view.scale = liveScale
+  }, 150)
+}
+function writeLiveTransform(): void {
+  const el = imgEl.value
+  if (!el) return
+  const base = baseScale.value || 1
+  el.style.transform = `translate(${liveTx}px, ${liveTy}px) scale(${liveScale / base})${extraCss()}`
+  if (pctEl.value) pctEl.value.textContent = Math.round(liveScale * 100) + '%'
+  if (sliderEl.value) {
+    sliderEl.value.value = String(Math.round((Math.log(liveScale / 0.1) / Math.log(100)) * 100))
+  }
+}
+/** 活动状态下的锚点缩放(直写,不碰响应式) */
+function liveZoomAt(clientX: number, clientY: number, factor: number): void {
+  const rect = liveStageRect
+  if (!rect) return
+  const cx = clientX - rect.left - rect.width / 2
+  const cy = clientY - rect.top - rect.height / 2
+  const old = liveScale
+  const next = clampScale(old * factor)
+  if (next === old) return
+  liveTx = cx - ((cx - liveTx) * next) / old
+  liveTy = cy - ((cy - liveTy) * next) / old
+  liveScale = next
+  writeLiveTransform()
+}
+
 function zoomAt(clientX: number, clientY: number, factor: number): void {
   const el = stageEl.value
   if (!el) return
@@ -79,6 +144,7 @@ function zoomAt(clientX: number, clientY: number, factor: number): void {
   view.tx = cx - ((cx - view.tx) * next) / old
   view.ty = cy - ((cy - view.ty) * next) / old
   view.scale = next
+  applyViewStyle()
 }
 
 function stepZoom(factor: number): void {
@@ -88,31 +154,39 @@ function stepZoom(factor: number): void {
   zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor)
 }
 
+/** 滚轮缩放量与滚动量成正比:每 delta=120 放大 10%;平滑滚轮的高频小 delta 线性累积,手感连续 */
+const WHEEL_K = Math.log(1.1) / 120
+let wheelPending: { x: number; y: number; delta: number } | null = null
+let wheelFrame = false
+
 function onWheel(e: WheelEvent): void {
+  // 只接管预览区内的滚轮;鼠标在详情面板/侧栏上滚动时放行默认行为(面板内容滚动)
+  const t = e.target as HTMLElement | null
+  if (!t || !t.closest('.previewer')) return
   e.preventDefault()
-  // 高回报率鼠标的滚轮事件一次会涌入多个,按帧合并后每帧只缩放一次
-  if (wheelPending) {
-    wheelPending.factor *= e.deltaY < 0 ? 1.12 : 1 / 1.12
-    return
-  }
-  wheelPending = { x: e.clientX, y: e.clientY, factor: e.deltaY < 0 ? 1.12 : 1 / 1.12 }
+  beginLive()
+  if (!wheelPending) wheelPending = { x: e.clientX, y: e.clientY, delta: 0 }
+  wheelPending.delta += e.deltaY
+  if (wheelFrame) return
+  wheelFrame = true
   requestAnimationFrame(() => {
+    wheelFrame = false
     const p = wheelPending
     wheelPending = null
-    if (p) zoomAt(p.x, p.y, p.factor)
+    if (p && p.delta !== 0) liveZoomAt(p.x, p.y, Math.exp(-p.delta * WHEEL_K))
+    scheduleLiveSync()
   })
 }
 
-// 拖拽平移(按帧合并:高回报率鼠标每秒数百上千个 mousemove,逐个更新会淹没主线程)
+// 拖拽平移(按帧合并 + live 直写:高回报率鼠标每秒数百上千个 mousemove 也不触发任何组件重渲染)
 let panning = false
 let panStart = { x: 0, y: 0, tx: 0, ty: 0, lastX: 0, lastY: 0 }
 let panFrame = false
-/** 滚轮缩放按帧合并的暂存 */
-let wheelPending: { x: number; y: number; factor: number } | null = null
 function panDown(e: MouseEvent): void {
   if (e.button !== 0 || cropping.value) return
   panning = true
-  panStart = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, lastX: e.clientX, lastY: e.clientY }
+  beginLive()
+  panStart = { x: e.clientX, y: e.clientY, tx: liveTx, ty: liveTy, lastX: e.clientX, lastY: e.clientY }
   window.addEventListener('mousemove', panMove)
   window.addEventListener('mouseup', panUp)
 }
@@ -125,20 +199,19 @@ function panMove(e: MouseEvent): void {
   requestAnimationFrame(() => {
     panFrame = false
     if (!panning) return
-    // 拖动期间只写合成层样式,不碰响应式(避免每帧触发组件重渲染);松手时一次性同步
-    const tx = panStart.tx + (panStart.lastX - panStart.x)
-    const ty = panStart.ty + (panStart.lastY - panStart.y)
-    const el = imgEl.value
-    const base = baseScale.value || 1
-    if (el) el.style.transform = `translate(${tx}px, ${ty}px) scale(${view.scale / base})${extraCss()}`
+    liveTx = panStart.tx + (panStart.lastX - panStart.x)
+    liveTy = panStart.ty + (panStart.lastY - panStart.y)
+    writeLiveTransform()
+    scheduleLiveSync()
   })
 }
 function panUp(): void {
   panning = false
   window.removeEventListener('mousemove', panMove)
   window.removeEventListener('mouseup', panUp)
-  view.tx = panStart.tx + (panStart.lastX - panStart.x)
-  view.ty = panStart.ty + (panStart.lastY - panStart.y)
+  liveTx = panStart.tx + (panStart.lastX - panStart.x)
+  liveTy = panStart.ty + (panStart.lastY - panStart.y)
+  scheduleLiveSync()
 }
 
 const transformStyle = computed(() => {
@@ -168,6 +241,11 @@ watch(
   () => [ui.preview.assetId, ui.preview.open],
   () => {
     if (!ui.preview.open) return
+    // 切图/重开:立即结算 live 状态,避免旧图的直写样式/数值残留
+    if (liveSyncTimer) clearTimeout(liveSyncTimer)
+    liveSyncTimer = null
+    liveActive = false
+    liveStageRect = null
     imgLoaded.value = false
     cropping.value = false
     // 库内尺寸即时可用,挂载后立即适配;每次打开/切换都回到自适应窗口
@@ -366,9 +444,12 @@ const zoomPct = computed(() => Math.round(view.scale * 100))
 /** 滑杆 0-100 对数映射到 0.1-10 倍 */
 const zoomSlider = computed(() => Math.round((Math.log(view.scale / 0.1) / Math.log(100)) * 100))
 function onSlider(e: Event): void {
+  // 拖动滑杆同样高频,走 live 直写
   const v = Number((e.target as HTMLInputElement).value)
-  view.scale = 0.1 * Math.pow(100, v / 100)
-  nextTick(applyViewStyle)
+  beginLive()
+  liveScale = clampScale(0.1 * Math.pow(100, v / 100))
+  writeLiveTransform()
+  scheduleLiveSync()
 }
 
 /** 直接写合成层变换(绕开 Vue 渲染管线,拖动零延迟);松手/缩放后再同步 view 状态 */
@@ -435,6 +516,7 @@ function applyViewStyle(): void {
       <span v-if="playlist.length" class="pv-page">{{ index + 1 }} / {{ playlist.length }}</span>
       <template v-if="asset.kind === 'image'">
         <input
+          ref="sliderEl"
           class="zoom-slider"
           type="range"
           min="0"
@@ -444,7 +526,7 @@ function applyViewStyle(): void {
           title="缩放"
           @input="onSlider"
         />
-        <span class="zoom-pct" title="缩放比例">{{ zoomPct }}%</span>
+        <span ref="pctEl" class="zoom-pct" title="缩放比例">{{ zoomPct }}</span>
       </template>
       <span class="tb-flex" />
       <template v-if="asset.kind === 'image'">

@@ -511,9 +511,9 @@ const videoRows = computed(() => {
   border-radius: var(--radius);
   overflow: hidden;
   background: rgba(0, 0, 0, 0.32);
-  /* 固定高度:预览区不随图片比例变化,下方内容不跳动 */
-  height: 42vh;
-  min-height: 160px;
+  /* 固定高度:预览区不随图片比例变化,下方内容不跳动;30vh 不喧宾夺主 */
+  height: 30vh;
+  min-height: 140px;
   display: flex;
   align-items: center;
   justify-content: center;
