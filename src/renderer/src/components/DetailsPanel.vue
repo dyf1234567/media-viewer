@@ -511,20 +511,19 @@ const videoRows = computed(() => {
   border-radius: var(--radius);
   overflow: hidden;
   background: rgba(0, 0, 0, 0.32);
-  min-height: 140px;
+  /* 固定高度:预览区不随图片比例变化,下方内容不跳动 */
+  height: 42vh;
+  min-height: 160px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .preview-box img {
-  /* 宽高全自适应 + 双上限:任何比例都完整可见,不裁切不拉伸 */
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 42vh;
+  /* 填满固定区域,等比 contain:任何比例的图都完整可见 */
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   display: block;
-  margin: 0 auto;
   cursor: zoom-in;
 }
 .missing-box {

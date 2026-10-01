@@ -105,14 +105,14 @@ function onWheel(e: WheelEvent): void {
 
 // 拖拽平移(按帧合并:高回报率鼠标每秒数百上千个 mousemove,逐个更新会淹没主线程)
 let panning = false
-let panStart = { x: 0, y: 0, tx: 0, ty: 0 }
+let panStart = { x: 0, y: 0, tx: 0, ty: 0, lastX: 0, lastY: 0 }
 let panFrame = false
 /** 滚轮缩放按帧合并的暂存 */
 let wheelPending: { x: number; y: number; factor: number } | null = null
 function panDown(e: MouseEvent): void {
   if (e.button !== 0 || cropping.value) return
   panning = true
-  panStart = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }
+  panStart = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, lastX: e.clientX, lastY: e.clientY }
   window.addEventListener('mousemove', panMove)
   window.addEventListener('mouseup', panUp)
 }
@@ -125,33 +125,39 @@ function panMove(e: MouseEvent): void {
   requestAnimationFrame(() => {
     panFrame = false
     if (!panning) return
-    // 只写合成层样式,不碰响应式状态;松手时一次性同步
-    view.tx = panStart.tx + (panStart.lastX - panStart.x)
-    view.ty = panStart.ty + (panStart.lastY - panStart.y)
+    // 拖动期间只写合成层样式,不碰响应式(避免每帧触发组件重渲染);松手时一次性同步
+    const tx = panStart.tx + (panStart.lastX - panStart.x)
+    const ty = panStart.ty + (panStart.lastY - panStart.y)
     const el = imgEl.value
-    const extra = pendingCss.value ? ' ' + pendingCss.value : ''
-    if (el) el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / (baseScale.value || 1)})${extra}`
+    const base = baseScale.value || 1
+    if (el) el.style.transform = `translate(${tx}px, ${ty}px) scale(${view.scale / base})${extraCss()}`
   })
 }
 function panUp(): void {
   panning = false
   window.removeEventListener('mousemove', panMove)
   window.removeEventListener('mouseup', panUp)
-  applyViewStyle()
+  view.tx = panStart.tx + (panStart.lastX - panStart.x)
+  view.ty = panStart.ty + (panStart.lastY - panStart.y)
 }
 
 const transformStyle = computed(() => {
   const base = baseScale.value > 0 ? baseScale.value : 1
-  const rot = totalRot.value % 180 !== 0
-  const w = (rot ? natural.value.h : natural.value.w) * base
-  const h = (rot ? natural.value.w : natural.value.h) * base
-  const extra = pendingCss.value ? ' ' + pendingCss.value : ''
+  // 盒子恒为原始比例(位图不变形),旋转/翻转放在 transform 里作用于内容
+  const extra = extraCss()
   return {
-    width: Math.round(w) + 'px',
-    height: Math.round(h) + 'px',
+    width: Math.round(natural.value.w * base) + 'px',
+    height: Math.round(natural.value.h * base) + 'px',
     transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})${extra}`
   }
 })
+/** 暂存变换的 CSS 片段:矩阵 M = F^b·R^r,字符串从左到右即矩阵乘序(scaleX 在 rotate 左) */
+function extraCss(): string {
+  let m = ''
+  if (totalRot.value) m += ` rotate(${totalRot.value}deg)`
+  if (flipped.value) m = ' scaleX(-1)' + m
+  return m
+}
 
 function onImgLoad(): void {
   // 缩略图与原图各触发一次;尺寸与适配都来自库内记录,这里只需点亮显示
@@ -170,9 +176,11 @@ watch(
 )
 
 // ---------- 切换 ----------
-async function step(delta: number): Promise<void> {
+function step(delta: number): void {
   if (saving.value || flushing) return
-  await flushPending() // 切图前把当前图的变换写盘
+  // 后台写盘当前图的暂存变换,切换立即发生(不等待保存,无"卡一下再切"的观感)
+  const cur = asset.value
+  if (cur && hasPending.value) void flushPending(cur.id)
   const list = playlist.value
   if (!list.length) return
   const next = (index.value + delta + list.length) % list.length
@@ -203,46 +211,41 @@ function toggleSlideshow(): void {
 }
 
 // ---------- 变换暂存(翻转/旋转不立即写盘,切换图片或退出预览时统一保存) ----------
-interface PendingOp {
-  rotate?: number
-  flipH?: boolean
-}
-const pendingOps = ref<PendingOp[]>([])
-const hasPending = computed(() => pendingOps.value.length > 0)
+/** 归并态:任何 90° 旋转×水平翻转序列都等价于 (rotUnits, flipped);写盘与视觉共用同一归并,一次 apply 完成 */
+const rotUnits = ref(0) // 0..3,顺时针 90° 的倍数
+const flipped = ref(false)
+const hasPending = computed(() => rotUnits.value !== 0 || flipped.value)
 let flushing = false
 
-/** 累计旋转角(90/270 时显示宽高互换) */
-const totalRot = computed(() => pendingOps.value.reduce((s, o) => s + (o.rotate ?? 0), 0) % 360)
-/** 变换后的 CSS 片段:后到的操作在字符串左侧(先作用于内容坐标),与逐个写盘的顺序一致 */
-const pendingCss = computed(() => {
-  let m = ''
-  for (const op of [...pendingOps.value].reverse()) {
-    if (op.flipH) m += ' scaleX(-1)'
-    if (op.rotate) m += ` rotate(${op.rotate}deg)`
-  }
-  return m.trim()
-})
+/** 等效旋转角与显示宽高互换 */
+const totalRot = computed(() => ((rotUnits.value % 4) + 4) % 4 * 90)
 
-function queueTransform(op: PendingOp): void {
+function queueTransform(op: { rotate?: number; flipH?: boolean }): void {
   if (!asset.value || asset.value.missing || cropping.value || flushing) return
-  pendingOps.value.push(op)
-  // 视觉立即生效并重新适配(旋转后宽高互换)
+  if (op.flipH) flipped.value = !flipped.value
+  if (op.rotate) {
+    // 已翻转时旋转方向取反(FR = R⁻¹F),保证与逐次操作的最终效果一致
+    rotUnits.value = flipped.value ? rotUnits.value - 1 : rotUnits.value + 1
+  }
+  // 视觉立即生效并重新适配(旋转后等效宽高互换)
   nextTick(() => fitView())
 }
 
-/** 把暂存的变换按序写盘(切换图片/退出预览/进入裁切前调用) */
-async function flushPending(): Promise<void> {
-  if (flushing || !pendingOps.value.length || !asset.value) return
+/** 把暂存变换一次性写盘(切换/退出/进入裁切或编辑器前调用);可指定目标,退出后组件上下文失效时仍可后台完成 */
+async function flushPending(targetId?: number): Promise<void> {
+  const id = targetId ?? asset.value?.id
+  if (flushing || !id || !hasPending.value) return
   flushing = true
-  const id = asset.value.id
-  const ops = pendingOps.value.splice(0)
-  for (let i = 0; i < ops.length; i++) {
+  const deg = ((rotUnits.value % 4) + 4) % 4 * 90
+  const flop = flipped.value
+  rotUnits.value = 0
+  flipped.value = false
+  if (deg || flop) {
     try {
-      await window.mv.editor.apply({ id, ...ops[i] })
+      await window.mv.editor.apply({ id, rotate: deg || undefined, flipH: flop || undefined })
     } catch (e) {
+      // 不回滚归并态:用户可能已切到其他图,回滚会污染新图视觉;仅提示丢本次操作
       toast.error(`保存失败: ${(e as Error).message}`)
-      pendingOps.value.unshift(...ops.slice(i))
-      break
     }
   }
   flushing = false
@@ -286,14 +289,16 @@ function toggleFullscreen(): void {
   else void document.exitFullscreen()
 }
 
-async function close(): Promise<void> {
+function close(): void {
   slideshow.value = false
   if (slideTimer) {
     clearInterval(slideTimer)
     slideTimer = null
   }
-  await flushPending() // 退出前保存未写盘的变换
+  // 先退出预览,暂存变换后台写盘(退出零等待)
+  const cur = asset.value
   ui.closePreview()
+  if (cur && hasPending.value) void flushPending(cur.id)
 }
 
 // ---------- 键盘 ----------
@@ -372,8 +377,7 @@ function applyViewStyle(): void {
   const el = imgEl.value
   if (!el) return
   const base = baseScale.value > 0 ? baseScale.value : 1
-  const extra = pendingCss.value ? ' ' + pendingCss.value : ''
-  el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})${extra}`
+  el.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})${extraCss()}`
 }
 </script>
 
