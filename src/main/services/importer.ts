@@ -6,6 +6,7 @@ import { ALL_EXTS, extOf, kindOfExt, sha256File, exists, collisionFreePath, isSu
 import { getDb, getAssetRow } from './db'
 import { mediaDir, trashDir } from './library'
 import { enqueueThumb } from './thumbs'
+import { extractColors } from './colors'
 import { emitAssets, emitCollections, broadcast, refreshAlbumCover } from './emitter'
 import { readVideoInfo } from './video'
 import { computePhash } from './phash'
@@ -281,6 +282,17 @@ export async function runImport({ entries, mode }: RunImportOptions): Promise<Im
       report.imported++
       touched.push(id)
       enqueueThumb(id)
+      // 主色随导入即时提取,详情面板立刻有颜色圆点
+      if (kind === 'image') {
+        const c = await extractColors(finalPath).catch(() => null)
+        if (c) {
+          db.prepare('UPDATE assets SET colors = ?, color_family = ? WHERE id = ?').run(
+            JSON.stringify(c.colors),
+            c.family,
+            id
+          )
+        }
+      }
     } catch (e) {
       report.failed.push({ file: item.path, reason: (e as Error).message })
     } finally {

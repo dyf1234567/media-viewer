@@ -348,9 +348,8 @@ const videoRows = computed(() => {
         </div>
       </details>
 
-      <!-- 标签 -->
+      <!-- 标签(TagEditor 自带标题) -->
       <div v-if="!ui.isTrash" class="sec">
-        <div class="sec-title">标签</div>
         <TagEditor :asset-id="full.id" />
       </div>
       <div v-else class="sec">
@@ -463,7 +462,7 @@ const videoRows = computed(() => {
   width: var(--details-w);
   flex: none;
   border-left: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(20, 21, 27, 0.92);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -625,9 +624,10 @@ const videoRows = computed(() => {
   gap: 6px;
 }
 .sec-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--text-dim);
+  color: var(--text);
+  margin-bottom: 8px;
 }
 .sec-title-row {
   display: flex;

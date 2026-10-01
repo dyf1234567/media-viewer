@@ -200,4 +200,40 @@ describe('parseComfyUI 多组正负提示词', () => {
     expect(m.prompt).toBe('正向文本')
     expect(m.negative).toBe('负向文本')
   })
+
+  it('多采样器 + 保存节点前缀匹配文件名:取真正产出本图的分支(110139 场景)', () => {
+    const graph = {
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: 'A 支正向' } },
+      '2': { class_type: 'CLIPTextEncode', inputs: { text: 'B 支正向' } },
+      '3': { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512 } },
+      '4': { class_type: 'KSampler', inputs: { seed: 1, steps: 20, cfg: 6, sampler_name: 'euler', positive: ['1', 0], latent_image: ['3', 0] } },
+      '5': { class_type: 'KSampler', inputs: { seed: 2, steps: 4, cfg: 1, sampler_name: 'euler', denoise: 1, positive: ['2', 0], latent_image: ['3', 0] } },
+      '6': { class_type: 'VAEDecode', inputs: { samples: ['4', 0] } },
+      '7': { class_type: 'VAEDecode', inputs: { samples: ['5', 0] } },
+      '8': { class_type: 'SaveImage', inputs: { images: ['6', 0], filename_prefix: 'krea/2026-09-21/111111' } },
+      '9': { class_type: 'SaveImage', inputs: { images: ['7', 0], filename_prefix: 'krea/2026-09-21/222222' } }
+    }
+    // 本图文件名为 222222_00001_.png → 应取 B 支
+    const m = parseComfyUI(JSON.stringify(graph), null, '222222')
+    expect(m.prompt).toBe('B 支正向')
+    expect(m.params['Steps']).toBe('4')
+    expect(m.params['Denoise']).toBe('1')
+    // 无文件名提示时退回全部分支(A 先)
+    const m2 = run(graph)
+    expect(m2.prompt).toContain('A 支正向')
+  })
+
+  it('ShowText 缓存的 LLM 运行时输出优先于通配符源文本(110139 LLM 场景)', () => {
+    const m = run({
+      '10': { class_type: 'DPRandomGenerator', inputs: { text: '亚洲女性，{||胶片摄影风格}，真实摄影' } },
+      '11': { class_type: 'Text Multiline', inputs: { text: '角色设定:你是一位提示词工程师' } },
+      '12': { class_type: 'YFUniversalLLM', inputs: { prompt: ['10', 0], system_prompt: ['11', 0] } },
+      '13': { class_type: 'ShowText|pysssss', inputs: { text: ['12', 0], text_0: '侧面机位，一位亚洲女性侧身站立于茶室' } },
+      '14': { class_type: 'easy ifElse', inputs: { on_true: ['13', 0], on_false: ['10', 0] } },
+      '15': { class_type: 'CLIPTextEncode', inputs: { text: ['14', 0] } },
+      '16': { class_type: 'KSampler', inputs: { seed: 1, steps: 4, cfg: 1, sampler_name: 'euler', positive: ['15', 0] } },
+      '17': { class_type: 'SaveImage', inputs: { images: ['16', 0], filename_prefix: 'x' } }
+    })
+    expect(m.prompt).toBe('侧面机位，一位亚洲女性侧身站立于茶室')
+  })
 })

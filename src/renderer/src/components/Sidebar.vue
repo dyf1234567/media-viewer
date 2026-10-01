@@ -131,7 +131,7 @@ function albumThumb(cover: string | null): string | null {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.14);
+  background: rgba(20, 21, 27, 0.88);
   overflow: hidden;
   transition: width 0.2s ease;
   flex: none;
@@ -149,7 +149,7 @@ function albumThumb(cover: string | null): string | null {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 8px 11px;
   border-radius: 8px;
   color: var(--text-dim);
   cursor: pointer;

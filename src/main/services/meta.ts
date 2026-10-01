@@ -61,7 +61,9 @@ export async function readAiMeta(file: string, ext: string): Promise<AiMeta | nu
     return parseA1111(paramsText)
   }
   if (promptText || workflowText) {
-    return parseComfyUI(promptText || '', workflowText || null)
+    // 文件名基础名(去掉 ComfyUI 的 _00001_ 序列)用于多采样器分支匹配
+    const base = file.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '').replace(/_\d{5}_?$/, '')
+    return parseComfyUI(promptText || '', workflowText || null, base)
   }
   return null
 }
@@ -188,8 +190,8 @@ function safeJsonParse<T>(text: string): T | null {
   }
 }
 
-/** 解析 ComfyUI 工作流导出 */
-export function parseComfyUI(promptText: string, workflowText: string | null): AiMeta {
+/** 解析 ComfyUI 工作流导出;fileNameBase 用于多采样器时锁定真正保存本图的分支 */
+export function parseComfyUI(promptText: string, workflowText: string | null, fileNameBase?: string): AiMeta {
   let prompt: string | null = null
   let negative: string | null = null
   const params: Record<string, string> = {}
@@ -211,8 +213,8 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
   }
   type Graph = Record<string, GNode>
 
-  /** 文本编码节点识别:CLIPEncodeXxx / TextEncodeQwenImage21 / WanVideoTextEncode 等都覆盖 */
-  const isTextNode = (ct: string): boolean => /cliptextencode|textencode/i.test(ct)
+  /** 文本编码节点识别:CLIPEncodeXxx / TextEncodeQwenImage21 / ShowText(LLM 输出缓存) 等都覆盖 */
+  const isTextNode = (ct: string): boolean => /cliptextencode|textencode|showtext/i.test(ct)
   /** 采样节点:KSampler 系与 SamplerCustom 系 */
   const isSamplerNode = (node: GNode): boolean => {
     const c = node.class_type.toLowerCase()
@@ -223,7 +225,8 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
 
   const posTextOf = (node: GNode): string | null => {
     const inp = node.inputs ?? {}
-    for (const k of ['prompt', 'text', 'text_pos', 'texts', 'positive_prompt', 'populated_text', 'wildcard_text']) {
+    // text_0 是 ShowText 等节点缓存的运行时实际文本(LLM 生成结果),优先取
+    for (const k of ['text_0', 'prompt', 'text', 'text_pos', 'texts', 'positive_prompt', 'populated_text', 'wildcard_text']) {
       const v = inp[k]
       if (typeof v === 'string' && v.trim()) return v.trim()
     }
@@ -240,18 +243,30 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
     return str(inp['text']) ?? str(inp['prompt'])
   }
 
-  /** 文本可能由上游字符串节点拼出(StringConcat / Primitive / 通配符处理器):沿字符串引用收集 */
-  const followStringRefs = (graph: Graph, id: string, depth: number, seen: Set<string>, out: string[]): void => {
-    if (depth > 8 || seen.has(id)) return
+  /** 沿引用打捞文本;showTextOnly=true 时只收集 ShowText 缓存的运行时输出(LLM 实际生效的提示词) */
+  const followStringRefs = (graph: Graph, id: string, depth: number, seen: Set<string>, out: string[], showTextOnly: boolean): void => {
+    if (depth > 10 || seen.has(id)) return
     seen.add(id)
     const node = graph[id]
     if (!node) return
-    for (const [k, v] of Object.entries(node.inputs ?? {})) {
-      if (/neg/i.test(k)) continue
+    const inp = node.inputs ?? {}
+    if (/showtext/i.test(node.class_type)) {
+      const t = posTextOf(node)
+      if (t && !out.includes(t)) out.push(t)
+      return
+    }
+    if (showTextOnly) {
+      for (const v of Object.values(inp)) {
+        if (Array.isArray(v)) followStringRefs(graph, String(v[0]), depth + 1, seen, out, true)
+      }
+      return
+    }
+    for (const [k, v] of Object.entries(inp)) {
+      if (/neg|seed|image|latent|model|clip|vae|video|audio/i.test(k)) continue
       if (typeof v === 'string' && v.trim() && /string|text|prompt|value/i.test(k)) {
         if (!out.includes(v)) out.push(v)
-      } else if (Array.isArray(v) && /string|text|prompt/i.test(k)) {
-        followStringRefs(graph, String(v[0]), depth + 1, seen, out)
+      } else if (Array.isArray(v)) {
+        followStringRefs(graph, String(v[0]), depth + 1, seen, out, false)
       }
     }
   }
@@ -270,10 +285,17 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
         ? ['prompt', 'text', 'text_pos', 'texts', 'positive_prompt']
         : ['negative_prompt', 'negative', 'text_neg', 'neg']
     if (dir === 'neg' && !hasDual) strKeys.push('text', 'prompt')
+    // 两级策略:先只找 ShowText 缓存的运行时文本(LLM 实际生效值),找不到再收集通配符/拼接串
+    const runtime: string[] = []
+    for (const k of strKeys) {
+      const v = inp[k]
+      if (Array.isArray(v)) followStringRefs(graph, String(v[0]), 0, new Set(), runtime, true)
+    }
+    if (runtime.length) return runtime.join('\n')
     const parts: string[] = []
     for (const k of strKeys) {
       const v = inp[k]
-      if (Array.isArray(v)) followStringRefs(graph, String(v[0]), 0, new Set(), parts)
+      if (Array.isArray(v)) followStringRefs(graph, String(v[0]), 0, new Set(), parts, false)
     }
     return parts.join('\n') || null
   }
@@ -387,19 +409,32 @@ export function parseComfyUI(promptText: string, workflowText: string | null): A
         }
       }
 
-      // 最终采样器:直接产出被保存图像的采样节点(A/B 对比流可能有多个,链式 refine 取末级)
-      const finalSamplers: GNode[] = []
+      // 最终采样器:直接产出被保存图像的采样节点(链式 refine 取末级;A/B 对比流可能有多个)
+      // 有文件名提示时,优先取「保存节点文件名前缀与本图文件名一致」的分支——多采样器工作流
+      // 的每个 SaveImage 都嵌入同一份完整工作流,只有前缀匹配才能锁定真正产出本图的采样器
+      const savePairs: { nodeId: string; prefix: string; sampler: GNode }[] = []
       for (const [id, node] of Object.entries(graph)) {
         if (!isSaveNode(node.class_type)) continue
+        const prefix = typeof node.inputs?.['filename_prefix'] === 'string' ? (node.inputs['filename_prefix'] as string) : ''
         for (const v of Object.values(node.inputs ?? {})) {
           if (Array.isArray(v)) {
             const r = backToSampler(graph, String(v[0]), 0, new Set())
-            if (r && !finalSamplers.includes(r)) finalSamplers.push(r)
+            if (r && !savePairs.some((p) => p.sampler === r && p.nodeId === id)) {
+              savePairs.push({ nodeId: id, prefix, sampler: r })
+            }
           }
         }
       }
       const samplerNodes = Object.values(graph).filter(isSamplerNode)
-      const targetSamplers = finalSamplers.length ? finalSamplers : samplerNodes
+      let targetSamplers: GNode[] = savePairs.map((p) => p.sampler)
+      if (fileNameBase) {
+        const matched = savePairs.filter((p) => {
+          const base = p.prefix.split(/[\\/]/).pop() ?? ''
+          return base === fileNameBase
+        })
+        if (matched.length) targetSamplers = matched.map((p) => p.sampler)
+      }
+      if (!targetSamplers.length) targetSamplers = samplerNodes
 
       // 正/负向:沿最终采样器的条件连线整棵收集(KSampler 直接 positive/negative;SamplerCustom 经 Guider)
       const posTexts: string[] = []

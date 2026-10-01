@@ -1,5 +1,6 @@
 import sharp from 'sharp'
 import type { RGB } from '../../shared/types'
+import { classifyColor } from '../../shared/colors'
 
 /** 从缩小的像素中提取最多 6 个主题色与色系分类 */
 export async function extractColors(
@@ -55,7 +56,7 @@ export async function extractColors(
     if (picked.every((p) => dist(p, avg) > 40)) picked.push(avg)
   }
 
-  const family = n > 0 ? classify(Math.round(sr / n), Math.round(sg / n), Math.round(sb / n)) : null
+  const family = n > 0 ? classifyColor(Math.round(sr / n), Math.round(sg / n), Math.round(sb / n)) : null
   return { colors: picked, family }
 }
 

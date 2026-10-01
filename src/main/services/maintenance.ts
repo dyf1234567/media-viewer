@@ -74,8 +74,8 @@ async function upgradeColorFamily(): Promise<void> {
   }
 }
 
-/** AI 元数据解析策略升级(v2:支持 Qwen 等新文本编码节点;v3:修正空负向兜底;v4:多组正负提示词/Combine/Guider 精确收集):清空旧解析并重读 */
-const AI_META_POLICY = 4
+/** AI 元数据解析策略升级(…v6:重读覆盖回收站;v7:ShowText 运行时文本优先+保存前缀锁定多采样器分支):清空旧解析并重读 */
+const AI_META_POLICY = 7
 async function upgradeAiMeta(): Promise<void> {
   const db = getDb()
   try {
@@ -88,11 +88,11 @@ async function upgradeAiMeta(): Promise<void> {
   }
   // 等渲染端完成初始加载并绑定事件,重读产生的更新才能实时推到界面
   await new Promise((r2) => setTimeout(r2, 2500))
-  // 重读(限流,后台跑)
+  // 重读(限流,后台跑;含回收站中的素材,恢复后信息完整)
   const rows = db
     .prepare(
       `SELECT id, file_path, ext FROM assets
-       WHERE kind = 'image' AND ai_meta IS NULL AND missing = 0 AND deleted_at IS NULL
+       WHERE kind = 'image' AND ai_meta IS NULL AND missing = 0
        LIMIT 1000`
     )
     .all() as { id: number; file_path: string; ext: string }[]
@@ -108,12 +108,12 @@ async function upgradeAiMeta(): Promise<void> {
   }
 }
 
-/** 旧素材缺主题色时后台自动补齐(限流,避免启动卡顿) */
+/** 旧素材缺主题色时后台自动补齐(限流,避免启动卡顿;'[]' 为历史失败标记,同样重试) */
 async function backfillColors(): Promise<void> {
   const rows = getDb()
     .prepare(
       `SELECT id, file_path FROM assets
-       WHERE colors IS NULL AND missing = 0 AND deleted_at IS NULL AND kind = 'image'
+       WHERE (colors IS NULL OR colors = '[]') AND missing = 0 AND deleted_at IS NULL AND kind = 'image'
        LIMIT 200`
     )
     .all() as { id: number; file_path: string }[]

@@ -99,6 +99,7 @@ const visible = computed<{ asset: Asset; index: number; pos: CardPos | null }[]>
   const out: { asset: Asset; index: number; pos: CardPos | null }[] = []
   if (ui.viewMode === 'waterfall') {
     const p = layout.value.positions
+    if (!p.length || p.length !== arr.length) return [] // 布局未就绪(容器宽度未知),避免读到 undefined
     const BLOCK = 64
     for (let b = 0; b < arr.length; b += BLOCK) {
       let minY = Infinity

@@ -212,6 +212,7 @@ body {
   background-image: var(--ui-bg-image);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   user-select: none;
 }
 body.app-backgrounded * {
@@ -228,19 +229,19 @@ body.app-backgrounded * {
   background: var(--accent-soft);
 }
 
-/* 滚动条 */
+/* 滚动条(Eagle 式细条,悬停浮出) */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.28);
   background-clip: content-box;
   border: 2px solid transparent;
 }
