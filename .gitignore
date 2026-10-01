@@ -9,3 +9,5 @@ release/
 .DS_Store
 Thumbs.db
 "scripts/tmp-meta.cjs"  
+
+/[0-9]*
