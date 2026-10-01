@@ -36,7 +36,7 @@ function doClose(): void {
 <template>
   <header class="titlebar">
     <div class="tb-left">
-      <button class="tb-btn" title="收起 / 展开侧栏" @click="emit('toggle-sidebar')">
+      <button class="tb-btn" title="收起 / 展开两侧面板" @click="emit('toggle-sidebar')">
         <Icon name="layers" :size="15" />
       </button>
       <div class="tb-title">

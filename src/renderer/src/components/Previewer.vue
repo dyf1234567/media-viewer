@@ -30,7 +30,6 @@ const asset = computed(() => playlist.value[index.value] ?? null)
 const view = reactive({ scale: 1, tx: 0, ty: 0 })
 const imgLoaded = ref(false)
 const stageEl = ref<HTMLElement | null>(null)
-const natural = reactive({ w: 0, h: 0 })
 const fullscreen = ref(false)
 const saving = ref(false)
 /** 适配基准:img 的 CSS 尺寸 = natural × baseScale,合成层纹理按显示尺寸栅格化(原图自然尺寸的层在大图上会数百毫秒重栅格,是拖动卡顿的根源) */
@@ -86,12 +85,24 @@ function stepZoom(factor: number): void {
 
 function onWheel(e: WheelEvent): void {
   e.preventDefault()
-  zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12)
+  // 高回报率鼠标的滚轮事件一次会涌入多个,按帧合并后每帧只缩放一次
+  if (wheelPending) {
+    wheelPending.factor *= e.deltaY < 0 ? 1.12 : 1 / 1.12
+    return
+  }
+  wheelPending = { x: e.clientX, y: e.clientY, factor: e.deltaY < 0 ? 1.12 : 1 / 1.12 }
+  requestAnimationFrame(() => {
+    const p = wheelPending
+    wheelPending = null
+    if (p) zoomAt(p.x, p.y, p.factor)
+  })
 }
 
 // 拖拽平移
 let panning = false
 let panStart = { x: 0, y: 0, tx: 0, ty: 0 }
+/** 滚轮缩放按帧合并的暂存 */
+let wheelPending: { x: number; y: number; factor: number } | null = null
 function panDown(e: MouseEvent): void {
   if (e.button !== 0 || cropping.value) return
   panning = true
@@ -294,7 +305,7 @@ function onSlider(e: Event): void {
     :style="{
       top: 'var(--titlebar-h)',
       right: ui.panelCollapsed ? '0' : 'var(--details-w, 0px)',
-      left: ui.sidebarCollapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)'
+      left: ui.sidebarCollapsed ? '0' : 'var(--sidebar-w)'
     }"
   >
     <!-- 舞台 -->
@@ -332,8 +343,10 @@ function onSlider(e: Event): void {
 
     <!-- 顶部工具栏(Eagle 式:返回 | 页码 | 缩放滑杆 | 动作 | 翻页);右侧详情面板保持可见 -->
     <div class="top-bar viewer-toolbar" :class="{ disabled: saving }">
-      <button class="pb-btn" title="返回(Esc)" :disabled="saving" @click="close">
-        <Icon name="chevron-left" :size="16" />
+      <!-- 返回:带描边胶囊样式,与翻页箭头明确区分 -->
+      <button class="pb-btn pb-back" title="返回(Esc)" :disabled="saving" @click="close">
+        <Icon name="arrow-left" :size="15" />
+        <span class="pb-back-label">返回</span>
       </button>
       <span v-if="playlist.length" class="pv-page">{{ index + 1 }} / {{ playlist.length }}</span>
       <template v-if="asset.kind === 'image'">
@@ -510,6 +523,23 @@ function onSlider(e: Event): void {
 .pb-btn.slide-on {
   color: var(--vc-accent);
   background: rgba(79, 124, 255, 0.16);
+}
+/* 返回按钮:描边胶囊 + 文字,与纯图标的翻页箭头形成明确差异 */
+.pb-back {
+  width: auto;
+  padding: 0 12px;
+  gap: 5px;
+  border: 1px solid var(--vc-border);
+  background: rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+}
+.pb-back-label {
+  white-space: nowrap;
+}
+.pb-back:hover:not(:disabled) {
+  border-color: var(--vc-accent);
+  color: var(--vc-accent);
+  background: rgba(79, 124, 255, 0.1);
 }
 .bar-sep {
   width: 1px;

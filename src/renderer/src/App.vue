@@ -70,6 +70,12 @@ onMounted(async () => {
 })
 
 // 拖拽导入(全屏遮罩提示,松手确认)
+// 侧栏开合:同时控制左右两侧(侧栏与详情面板),任一侧展开则收起全部,否则展开全部
+function toggleSidePanels(): void {
+  const anyOpen = !ui.sidebarCollapsed || !ui.panelCollapsed
+  ui.sidebarCollapsed = anyOpen
+  ui.panelCollapsed = anyOpen
+}
 function onDragEnter(e: DragEvent): void {
   if (!e.dataTransfer?.types.includes('Files')) return
   dragDepth++
@@ -107,7 +113,7 @@ function onDrop(e: DragEvent): void {
       <div class="orb o3" />
     </div>
 
-    <TitleBar @toggle-sidebar="ui.sidebarCollapsed = !ui.sidebarCollapsed" />
+    <TitleBar @toggle-sidebar="toggleSidePanels" />
 
     <div class="app-body">
       <Sidebar v-if="!ui.sidebarCollapsed" />

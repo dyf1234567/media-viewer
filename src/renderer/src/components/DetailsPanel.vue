@@ -5,7 +5,7 @@ import { useUiStore } from '../stores/ui'
 import { useLibraryStore } from '../stores/library'
 import { useToastStore } from '../stores/toast'
 import { scopeFilter, applyFilters, applySort } from '../util/pipeline'
-import { fmtBytes, fmtDate, fmtDuration, rgbCss, sourceUrl, thumbUrl } from '../util/format'
+import { fmtBytes, fmtDate, fmtDuration, rgbCss, thumbUrl } from '../util/format'
 import Icon from './Icon.vue'
 import RatingStars from './details/RatingStars.vue'
 import HistogramBox from './details/HistogramBox.vue'
@@ -251,11 +251,11 @@ const videoRows = computed(() => {
     </div>
 
     <template v-else>
-      <!-- 预览器?-->
+      <!-- 预览器(用缩略图:预览器打开时避免同一张原图解码两次) -->
       <div class="preview-box">
         <img
           v-if="!full.missing"
-          :src="sourceUrl(full)"
+          :src="thumbUrl(full)"
           alt=""
           @dblclick="ui.openPreview(full.id)"
         />
