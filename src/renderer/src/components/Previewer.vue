@@ -4,7 +4,7 @@ import { useUiStore } from '../stores/ui'
 import { useLibraryStore } from '../stores/library'
 import { useToastStore } from '../stores/toast'
 import { scopeFilter, applyFilters, applySort } from '../util/pipeline'
-import { sourceUrl } from '../util/format'
+import { sourceUrl, thumbUrl } from '../util/format'
 import Icon from './Icon.vue'
 import VideoPlayer from './VideoPlayer.vue'
 import CropOverlay from './CropOverlay.vue'
@@ -33,6 +33,16 @@ const stageEl = ref<HTMLElement | null>(null)
 const natural = reactive({ w: 0, h: 0 })
 const fullscreen = ref(false)
 const saving = ref(false)
+/** 适配基准:img 的 CSS 尺寸 = natural × baseScale,合成层纹理按显示尺寸栅格化(原图自然尺寸的层在大图上会数百毫秒重栅格,是拖动卡顿的根源) */
+const baseScale = ref(1)
+/** 真实宽高直接用库内记录(缩略图与原图同比例,加载前即可完成布局与适配) */
+const natural = computed(() => ({ w: asset.value?.width ?? 0, h: asset.value?.height ?? 0 }))
+
+function fitScaleOf(): number {
+  const el = stageEl.value
+  if (!el || !natural.w) return 1
+  return Math.max(0.1, Math.min(el.clientWidth / natural.w, el.clientHeight / natural.h, 1))
+}
 
 function resetView(): void {
   view.scale = 1
@@ -42,12 +52,9 @@ function resetView(): void {
 }
 
 function fitView(): void {
-  const el = stageEl.value
-  if (!el || !natural.w) return
-  const sw = el.clientWidth
-  const sh = el.clientHeight
-  const scale = Math.min(sw / natural.w, sh / natural.h, 1)
-  view.scale = Math.max(0.1, scale)
+  const scale = fitScaleOf()
+  baseScale.value = scale
+  view.scale = scale
   view.tx = 0
   view.ty = 0
 }
@@ -103,24 +110,27 @@ function panUp(): void {
   window.removeEventListener('mouseup', panUp)
 }
 
-const transformStyle = computed(() => ({
-  transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale})`
-}))
+const transformStyle = computed(() => {
+  const base = baseScale.value > 0 ? baseScale.value : 1
+  return {
+    width: Math.round(natural.w * base) + 'px',
+    height: Math.round(natural.h * base) + 'px',
+    transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})`
+  }
+})
 
-function onImgLoad(e: Event): void {
-  const img = e.target as HTMLImageElement
-  natural.w = img.naturalWidth
-  natural.h = img.naturalHeight
+function onImgLoad(): void {
+  // 缩略图与原图各触发一次;尺寸与适配都来自库内记录,这里只需点亮显示
   imgLoaded.value = true
-  fitView()
 }
 
 watch(
   () => ui.preview.assetId,
   () => {
     imgLoaded.value = false
-    resetView()
     cropping.value = false
+    // 库内尺寸即时可用,挂载后立即适配;缩略图秒开,原图到后无缝替换
+    nextTick(() => fitView())
   }
 )
 
@@ -281,15 +291,20 @@ function onSlider(e: Event): void {
     v-if="asset"
     class="previewer"
     :class="{ cropping }"
-    :style="{ top: 'var(--titlebar-h)', right: ui.panelCollapsed ? '0' : 'var(--details-w, 0px)' }"
+    :style="{
+      top: 'var(--titlebar-h)',
+      right: ui.panelCollapsed ? '0' : 'var(--details-w, 0px)',
+      left: ui.sidebarCollapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)'
+    }"
   >
     <!-- 舞台 -->
     <div ref="stageEl" class="stage" @mousedown="panDown" @dblclick="fitView">
       <template v-if="asset.kind === 'image'">
+        <!-- 缩略图立即显示,原图解码完成后无缝替换(Eagle 式打开即见);尺寸用库内真实宽高,不必等解码 -->
         <img
           v-show="imgLoaded && !asset.missing"
           :key="asset.id + '-' + asset.fileModifiedAt"
-          :src="sourceUrl(asset)"
+          :src="imgLoaded ? sourceUrl(asset) : thumbUrl(asset)"
           class="view-img"
           :style="transformStyle"
           draggable="false"
@@ -321,7 +336,6 @@ function onSlider(e: Event): void {
         <Icon name="chevron-left" :size="16" />
       </button>
       <span v-if="playlist.length" class="pv-page">{{ index + 1 }} / {{ playlist.length }}</span>
-      <span class="tb-flex" />
       <template v-if="asset.kind === 'image'">
         <input
           class="zoom-slider"
@@ -334,6 +348,9 @@ function onSlider(e: Event): void {
           @input="onSlider"
         />
         <span class="zoom-pct" title="缩放比例">{{ zoomPct }}%</span>
+      </template>
+      <span class="tb-flex" />
+      <template v-if="asset.kind === 'image'">
         <button class="pb-btn" title="适应窗口(0)" @click="resetView">
           <Icon name="arrowsOut" :size="15" />
         </button>
@@ -383,12 +400,12 @@ function onSlider(e: Event): void {
 <style scoped>
 .previewer {
   position: fixed;
-  /* Eagle 式:只盖住内容区,标题栏与右侧详情面板保持可见(top/right 由内联样式按面板状态绑定) */
-  left: 0;
+  /* Eagle 式:只盖住内容区,标题栏/侧栏/右侧详情面板保持可见(top/right/left 由内联样式按面板状态绑定) */
   bottom: 0;
   z-index: 700;
   background: var(--viewer-bg, #111113);
   display: flex;
+  transition: left 0.2s ease, right 0.2s ease;
 }
 .stage {
   flex: 1;
@@ -437,6 +454,10 @@ function onSlider(e: Event): void {
 }
 .viewer-toolbar {
   gap: 4px;
+}
+/* 容器穿透让空白处可拖拽图片,控件本身必须恢复可点击 */
+.viewer-toolbar > * {
+  pointer-events: auto;
 }
 .tb-flex {
   flex: 1;

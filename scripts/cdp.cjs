@@ -50,7 +50,20 @@ async function session() {
   const send = (method, params = {}) =>
     new Promise((res, rej) => {
       const id = ++seq
-      pending.set(id, { res, rej })
+      const timer = setTimeout(() => {
+        pending.delete(id)
+        rej(new Error(`CDP ${method} 超时(30s)`))
+      }, 30000)
+      pending.set(id, {
+        res: (v) => {
+          clearTimeout(timer)
+          res(v)
+        },
+        rej: (e) => {
+          clearTimeout(timer)
+          rej(e)
+        }
+      })
       ws.send(JSON.stringify({ id, method, params }))
     })
   await send('Runtime.enable')
