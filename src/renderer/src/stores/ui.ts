@@ -185,6 +185,8 @@ export const useUiStore = defineStore('ui', {
     },
     openPreview(id: number): void {
       this.preview = { open: true, assetId: id }
+      // 右侧详情面板同步跟随(从右键菜单等未选中路径打开时面板也有内容)
+      this.detailsAssetId = id
     },
     closePreview(): void {
       this.preview = { open: false, assetId: null }

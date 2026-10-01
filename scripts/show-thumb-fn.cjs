@@ -1,0 +1,10 @@
+// show-thumb-fn.cjs — 查看 thumbUrl 与 DetailsPanel 预览分支
+const fs = require('fs')
+const fmt = fs.readFileSync('src/renderer/src/util/format.ts', 'utf8')
+const i = fmt.indexOf('thumbUrl')
+console.log('=== thumbUrl ===')
+console.log(fmt.slice(i - 100, i + 400))
+const dp = fs.readFileSync('src/renderer/src/components/DetailsPanel.vue', 'utf8')
+const j = dp.indexOf('preview-box')
+console.log('=== DetailsPanel preview-box ===')
+console.log(dp.slice(j - 60, j + 700))

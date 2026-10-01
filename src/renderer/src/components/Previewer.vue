@@ -1,5 +1,5 @@
 ?<script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useUiStore } from '../stores/ui'
 import { useLibraryStore } from '../stores/library'
 import { useToastStore } from '../stores/toast'
@@ -39,8 +39,9 @@ const natural = computed(() => ({ w: asset.value?.width ?? 0, h: asset.value?.he
 
 function fitScaleOf(): number {
   const el = stageEl.value
-  if (!el || !natural.w) return 1
-  return Math.max(0.1, Math.min(el.clientWidth / natural.w, el.clientHeight / natural.h, 1))
+  if (!el || !natural.value.w) return 1
+  // 自适应窗口:小图也放大到铺满可视区(默认打开即适配,不设 100% 上限)
+  return Math.max(0.1, Math.min(el.clientWidth / natural.value.w, el.clientHeight / natural.value.h))
 }
 
 function resetView(): void {
@@ -98,9 +99,10 @@ function onWheel(e: WheelEvent): void {
   })
 }
 
-// 拖拽平移
+// 拖拽平移(按帧合并:高回报率鼠标每秒数百上千个 mousemove,逐个更新会淹没主线程)
 let panning = false
 let panStart = { x: 0, y: 0, tx: 0, ty: 0 }
+let panFrame = false
 /** 滚轮缩放按帧合并的暂存 */
 let wheelPending: { x: number; y: number; factor: number } | null = null
 function panDown(e: MouseEvent): void {
@@ -112,8 +114,16 @@ function panDown(e: MouseEvent): void {
 }
 function panMove(e: MouseEvent): void {
   if (!panning) return
-  view.tx = panStart.tx + (e.clientX - panStart.x)
-  view.ty = panStart.ty + (e.clientY - panStart.y)
+  panStart.lastX = e.clientX
+  panStart.lastY = e.clientY
+  if (panFrame) return
+  panFrame = true
+  requestAnimationFrame(() => {
+    panFrame = false
+    if (!panning) return
+    view.tx = panStart.tx + (panStart.lastX - panStart.x)
+    view.ty = panStart.ty + (panStart.lastY - panStart.y)
+  })
 }
 function panUp(): void {
   panning = false
@@ -124,8 +134,8 @@ function panUp(): void {
 const transformStyle = computed(() => {
   const base = baseScale.value > 0 ? baseScale.value : 1
   return {
-    width: Math.round(natural.w * base) + 'px',
-    height: Math.round(natural.h * base) + 'px',
+    width: Math.round(natural.value.w * base) + 'px',
+    height: Math.round(natural.value.h * base) + 'px',
     transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.scale / base})`
   }
 })
@@ -136,11 +146,12 @@ function onImgLoad(): void {
 }
 
 watch(
-  () => ui.preview.assetId,
+  () => [ui.preview.assetId, ui.preview.open],
   () => {
+    if (!ui.preview.open) return
     imgLoaded.value = false
     cropping.value = false
-    // 库内尺寸即时可用,挂载后立即适配;缩略图秒开,原图到后无缝替换
+    // 库内尺寸即时可用,挂载后立即适配;每次打开/切换都回到自适应窗口
     nextTick(() => fitView())
   }
 )
@@ -281,6 +292,10 @@ function onKeydown(e: KeyboardEvent): void {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('wheel', onWheel, { passive: false })
+  // 首次打开:触发挂载的那次状态变化先于 watcher 注册,这里兜底适配
+  nextTick(() => {
+    if (ui.preview.open && asset.value) fitView()
+  })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
@@ -343,10 +358,8 @@ function onSlider(e: Event): void {
 
     <!-- 顶部工具栏(Eagle 式:返回 | 页码 | 缩放滑杆 | 动作 | 翻页);右侧详情面板保持可见 -->
     <div class="top-bar viewer-toolbar" :class="{ disabled: saving }">
-      <!-- 返回:带描边胶囊样式,与翻页箭头明确区分 -->
-      <button class="pb-btn pb-back" title="返回(Esc)" :disabled="saving" @click="close">
-        <Icon name="arrow-left" :size="15" />
-        <span class="pb-back-label">返回</span>
+      <button class="pb-btn" title="返回(Esc)" :disabled="saving" @click="close">
+        <Icon name="chevron-left" :size="16" />
       </button>
       <span v-if="playlist.length" class="pv-page">{{ index + 1 }} / {{ playlist.length }}</span>
       <template v-if="asset.kind === 'image'">
@@ -523,23 +536,6 @@ function onSlider(e: Event): void {
 .pb-btn.slide-on {
   color: var(--vc-accent);
   background: rgba(79, 124, 255, 0.16);
-}
-/* 返回按钮:描边胶囊 + 文字,与纯图标的翻页箭头形成明确差异 */
-.pb-back {
-  width: auto;
-  padding: 0 12px;
-  gap: 5px;
-  border: 1px solid var(--vc-border);
-  background: rgba(0, 0, 0, 0.24);
-  font-size: 12px;
-}
-.pb-back-label {
-  white-space: nowrap;
-}
-.pb-back:hover:not(:disabled) {
-  border-color: var(--vc-accent);
-  color: var(--vc-accent);
-  background: rgba(79, 124, 255, 0.1);
 }
 .bar-sep {
   width: 1px;
